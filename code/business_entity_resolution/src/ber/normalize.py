@@ -20,7 +20,7 @@ _RE_LEET0 = re.compile(r"(?<=[a-z])0|0(?=[a-z])")
 _RE_NONALNUM = re.compile(r"[^a-z0-9]+")
 _RE_INITIALS = re.compile(r"\b(?:[a-z] )+[a-z]\b")
 _RE_NULL = re.compile(r"<\s*null\s*>|\bnull\b|\bn/a\b|\bnone\b")
-_RE_HOUSE_NO = re.compile(r"\b(?:h\s*\.?\s*no|house\s+no|door\s+no|flat\s+no|plot\s+no|no|ndeg)\b\.?")
+_RE_HOUSE_NO = re.compile(r"\b(?:h\s*\.?\s*no|house\s+no|door\s+no|flat\s+no|plot\s+no|no)\b\.?|\bndeg(?=\d|\b)")
 _RE_LEAD0 = re.compile(r"\b0+(?=\d)")
 
 # Canonical street-type / direction forms (US, India, France). Both sides of a pair
