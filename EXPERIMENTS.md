@@ -114,3 +114,20 @@ External evidence [S], Karthikatstuffmama/amazon-ml-challenge-2026, 3% dev slice
 **Decision: no-go.** The pre-registered criteria were ≥2× faster on rev and combo, unchanged recall, and Jaccard ≥0.999. The GPU is 2–2.7× *slower*. Recall is equal, but the pair sets differ at the k-th tie, which matters for names duplicated across many targets. Why it loses: cuSPARSE needs a dense right-hand side, so the GPU performs nnz(items)×q multiply-adds, almost all against zero query entries. sparse_dot_topn touches only the overlapping n-grams. Test blocking stays on the CPU. The opt-in code is inert by default and stays in place.
 
 Other GPU candidates were not pursued: the remaining stages are below 3% of blocking time. The GPU is used where it helps, which is dense e5 encoding (about 3,000 texts/s) and dense top-k.
+
+## E-M1: A1 vs A2 on the eval fold (fold 0, 220,845 S1, 9.09M candidate pairs)
+Train folds {1,2}, tuning fold {3} (early stopping and the choice of decision variant and τ), eval fold {0} reported once. Candidates come from E-B2 blocking. Reports are in `work/reports/eval_A{1,2}.json`.
+
+| | features | macro F0.5 | macro P | macro R | pair P | pair R | FP pairs | singleton acc | F0.5 (1 true) | F0.5 (2-3) | F0.5 (4+) | pred pairs/S1 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| blocking oracle | – | 0.99430 | 1.0 | 0.98279 | 1.0 | 0.98298 | 0 | 1.0 | 0.98182 | 0.99383 | 0.99544 | 3.406 |
+| A1 pairwise LGBM, threshold+excl τ=0.66 | 29 | 0.96428 | 0.98907 | 0.91923 | 0.98923 | 0.91945 | 7,657 | 0.96010 | 0.90226 | 0.96285 | 0.97292 | 3.220 |
+| **A2 stage-1 OOF → stage-2, threshold+excl τ=0.67** | 54 | **0.98045** | **0.99334** | **0.95898** | 0.99369 | 0.95915 | 4,661 | 0.98009 | 0.92929 | 0.98052 | 0.98615 | 3.344 |
+| A2, threshold only τ=0.69 | 54 | 0.98036 | 0.99361 | 0.95823 | 0.99394 | 0.95841 | 4,470 | 0.98050 | 0.92848 | 0.98046 | 0.98606 | 3.341 |
+
+- A2 improves macro F0.5 by **+0.0162** over A1, with both recall (+4.0 pt) and precision (+0.4 pt) rising. Tuning-fold F0.5 was 0.98055 against 0.98045 on the eval fold, so there is no sign of tuning overfit.
+- Exclusivity (many-to-one) adds only +0.0001 for A2, down from +0.0007 for A1: the stage-2 context features already capture most of it.
+- Validation logloss: A1 0.01398 (1,500 iterations, still falling at the cap), A2 stage-1 0.00769, A2 stage-2 0.00638 (816 iterations).
+- A2's top features by gain are p1, rev_margin, p1_qgap and r_rev, all context-dependent. Because the test pool has about 2× more distractors, test predicted pairs per S1 must be checked against the 3.34 seen on eval before submitting A2.
+- Remaining gap to the blocking oracle is 0.0139, mostly recall. S1 with exactly one true match (0.929) are the weakest group.
+- Runtime: A1 evaluate 25.2 min with 5.84 GB peak RSS; A2 evaluate 29.9 min with 9.8 GB peak RSS.
