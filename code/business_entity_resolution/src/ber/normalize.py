@@ -20,7 +20,7 @@ _RE_LEET0 = re.compile(r"(?<=[a-z])0|0(?=[a-z])")
 _RE_NONALNUM = re.compile(r"[^a-z0-9]+")
 _RE_INITIALS = re.compile(r"\b(?:[a-z] )+[a-z]\b")
 _RE_NULL = re.compile(r"<\s*null\s*>|\bnull\b|\bn/a\b|\bnone\b")
-_RE_HOUSE_NO = re.compile(r"\b(?:h\s*\.?\s*no|house\s+no|door\s+no|flat\s+no|plot\s+no|no)\b\.?")
+_RE_HOUSE_NO = re.compile(r"\b(?:h\s*\.?\s*no|house\s+no|door\s+no|flat\s+no|plot\s+no|no|ndeg)\b\.?")
 _RE_LEAD0 = re.compile(r"\b0+(?=\d)")
 
 # Canonical street-type / direction forms (US, India, France). Both sides of a pair
@@ -33,6 +33,8 @@ _ADDR_TOKENS = {
     "building": "bldg", "north": "n", "south": "s", "east": "e", "west": "w",
     "r": "rue", "chemin": "ch", "allee": "all", "impasse": "imp", "route": "rte",
     "nagar": "ngr", "marg": "mg", "sector": "sec", "opp": "opposite", "nr": "near",
+    # France (test only): "N°" -> anyascii "ndeg" is stripped above; common abbreviations
+    "saint": "st", "sainte": "ste", "cours": "crs", "quai": "q",
 }
 _US_STATES = {
     "alabama": "al", "alaska": "ak", "arizona": "az", "arkansas": "ar", "california": "ca",
