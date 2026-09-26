@@ -14,6 +14,11 @@ Benchmark on real data (India, train prep, labels only for recall):
   .venv-dense/bin/python src/experiments/gpu_topk.py bench [--queries 20000] [--pool 1000000] [--dtype float16]
 Reports time per query (CPU sparse_dot_topn with 65k column blocks vs GPU), set agreement,
 and recall of true pairs for fwd name / fwd combo / rev combo.
+
+RESULT (RTX 3050 Laptop 4 GB, India, 1M-target pool; EXPERIMENTS.md E-B4): NO-GO. The GPU is
+2-2.7x SLOWER than the CPU (0.37x name, 0.53x combo, 0.45x rev), recall is equal and the pair-set
+Jaccard is 0.79-0.91 (ties). The dense query RHS makes the GPU multiply mostly zeros; the CPU
+sparse x sparse kernel does not. Keep BER_TOPK unset.
 """
 import argparse
 import math

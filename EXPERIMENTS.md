@@ -92,3 +92,25 @@ Mechanism: anyascii turns "लक्ष्मी" into "lksmi", which has almost
 External evidence [S], Karthikatstuffmama/amazon-ml-challenge-2026, 3% dev slice: e5 dense ∪ key blocking gave recall 0.974 → 0.993 and holdout F0.5 +0.0065 (India +0.0128). Per-country τ was flat or worse. Public LB top-10 cut 0.986. A second repo (Dhruv716-stack) reports local 0.9102 → leaderboard 0.894 (−0.016 with France).
 
 **Label-free test token audit (redecode motivation):** unmapped target-only tokens. France: `ndeg` (N°, 3.3%), `st`/saint, `crs`, `q` (fixed in 23c8756 for test prep). India: anyascii'd native state names (`mharastr` 5.2%, `dilli` 3.3%, `uttr prdes`, `krnatk`, …; ≈25% of targets) are not mapped to S1 state codes, so only the RapidFuzz address features are affected (TF-IDF drops frequent state tokens). Logged for a future train+test re-run.
+
+## E-B4. Blocking runtime profile and the GPU top-K test (parallel track): no-go
+
+**Profile** (train blocking log): sparse top-K takes about 97% of blocking time. India: name 4.9 + addr 2.6 + combo 7.8 + rev 18.0 of 34.5 min. US: 15.9 + 3.6 + 20.3 + 47.1 of 88.3 min. TF-IDF fitting, transforms and the union are under 3% together. Top-K is therefore the only stage where a speed-up would matter.
+
+**GPU implementation** (`src/experiments/gpu_topk.py`, opt-in `BER_TOPK=gpu` in `blocking.topk`, commit b6dc27a):
+- The item CSR is stored int32 on the GPU.
+- Each 512-query chunk is scattered into a dense V×q matrix.
+- cuSPARSE SpMM runs per item block, followed by top-k and a merge.
+- It is the exact same computation (positive scores only). Self-test on random data: Jaccard 1.0.
+
+**Benchmark** (RTX 3050 Laptop, 4 GB; India train, all 883k S1, a 1M-target pool containing every true target of the sampled queries; the CPU was contended by A1 training and is still faster):
+
+| view | queries | CPU ms/q | GPU ms/q | speed-up | pair-set Jaccard | recall CPU / GPU |
+|---|---|---|---|---|---|---|
+| fwd name k5 | 20,000 | 0.832 | 2.245 | 0.37× | 0.787 | 0.4911 / 0.4905 |
+| fwd combo k10 | 20,000 | 1.239 | 2.351 | 0.53× | 0.871 | 0.9079 / 0.9080 |
+| rev combo k8 | 97,869 | 0.916 | 2.055 | 0.45× | 0.914 | 0.9712 / 0.9712 |
+
+**Decision: no-go.** The pre-registered criteria were ≥2× faster on rev and combo, unchanged recall, and Jaccard ≥0.999. The GPU is 2–2.7× *slower*. Recall is equal, but the pair sets differ at the k-th tie, which matters for names duplicated across many targets. Why it loses: cuSPARSE needs a dense right-hand side, so the GPU performs nnz(items)×q multiply-adds, almost all against zero query entries. sparse_dot_topn touches only the overlapping n-grams. Test blocking stays on the CPU. The opt-in code is inert by default and stays in place.
+
+Other GPU candidates were not pursued: the remaining stages are below 3% of blocking time. The GPU is used where it helps, which is dense e5 encoding (about 3,000 texts/s) and dense top-k.
