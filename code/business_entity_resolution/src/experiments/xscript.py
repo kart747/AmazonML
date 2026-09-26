@@ -165,6 +165,7 @@ def merge(split, dst: Path):
     W = config.WORK_DIR
     src_b, dst_b = W / "block" / split, dst / "block" / split
     dst_b.mkdir(parents=True, exist_ok=True)
+    (dst / "reports").mkdir(exist_ok=True)  # run.py evaluate writes there without creating it
     if not (dst / "prep").exists():
         os.symlink((W / "prep").resolve(), dst / "prep")
     # rev/cand files of countries without an xs file are linked unchanged

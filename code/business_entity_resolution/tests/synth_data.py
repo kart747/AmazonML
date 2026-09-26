@@ -22,6 +22,21 @@ CITIES = {"US": [("Austin", "Texas", "TX"), ("Everson", "Washington", "WA"), ("L
           "France": [("Bordeaux", "Nouvelle-Aquitaine", "33"), ("Nantes", "Pays de la Loire", "44")]}
 
 
+# Devanagari spellings of the synthetic vocabulary: India target copies are sometimes written
+# in native script (the main cause of blocking misses on the real data)
+DEVANAGARI = dict(zip(
+    ("apex blue cedar delta eagle falcon global harbor iris jade krishna lotus metro nova orion prime "
+     "quest raven sai shree summit tiger urban vista zenith coastal franklin ashutosh traders consulting "
+     "motors foods logistics labs pharma textiles bakery realty private limited pvt ltd llp").split(),
+    ("एपेक्स ब्लू सीडर डेल्टा ईगल फाल्कन ग्लोबल हार्बर आइरिस जेड कृष्णा लोटस मेट्रो नोवा ओरियन प्राइम "
+     "क्वेस्ट रेवन साई श्री समिट टाइगर अर्बन विस्टा ज़ेनिथ कोस्टल फ्रैंकलिन आशुतोष ट्रेडर्स कंसल्टिंग "
+     "मोटर्स फूड्स लॉजिस्टिक्स लैब्स फार्मा टेक्सटाइल्स बेकरी रियल्टी प्राइवेट लिमिटेड प्रा. लि. एलएलपी").split()))
+
+
+def _native(name):
+    return " ".join(DEVANAGARI.get(t.lower(), t) for t in name.split())
+
+
 def _typo(r, s):
     if len(s) < 4:
         return s
@@ -62,9 +77,14 @@ def _name(r, n):
     return s.upper() if r.random() < 0.2 else s
 
 
-def make(root: Path, n_train=3000, n_test=1500, seed=0):
+def make(root: Path, n_train=3000, n_test=1500, seed=0, native_share=0.25):
     r = random.Random(seed)
+    rs = random.Random(seed + 7)  # separate stream: native-script choices leave all other data unchanged
     used = set()
+
+    def tname(c, name):
+        s = _name(r, name)
+        return _native(s) if c == "India" and rs.random() < native_share else s
 
     def uid(prefix):
         while True:
@@ -87,11 +107,11 @@ def make(root: Path, n_train=3000, n_test=1500, seed=0):
                 for src, rows, pre in ((2, s2, "S2"), (3, s3, "S3")):
                     for _ in range(r.randint(0, 3) + (1 if src == 2 else 0)):
                         tid = uid(pre)
-                        rows.append((tid, _name(r, name), _addr(r, a, True), c))
+                        rows.append((tid, tname(c, name), _addr(r, a, True), c))
                         matches.append(tid)
             if r.random() < 0.3:  # sibling lookalike distractor: same name, nearby number
                 num, *rest = a
-                s2.append((uid("S2"), _name(r, name), _addr(r, (num + r.randint(2, 9), *rest), True), c))
+                s2.append((uid("S2"), tname(c, name), _addr(r, (num + r.randint(2, 9), *rest), True), c))
             gt.append((sid, ",".join(matches)))
         for _ in range(int(0.3 * n)):  # unrelated distractors
             c = r.choice(countries)

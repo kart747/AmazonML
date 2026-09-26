@@ -33,6 +33,18 @@ Copy `work/prep/`, `work/block/` and `work/feat/` from the machine that produced
 - **loco.py**: trains on US and evaluates on India, and the reverse, with τ chosen on the source country. Measures the unseen-country gap and how much τ should rise for unseen labels (France = 15% of test).
 - **features_v2.py**: adds a learned cross-script dictionary (from train-fold pairs only), consonant skeletons, rarest-unmatched-token IDF, learned core-token overlap and number conflicts. Ablate with `BER_EXTRA=featx` against the same run without it.
 
+## Parallel-track modules (owned by the second session; smoke test: `python tests/test_parallel_modules.py`)
+
+| Experiment | Needs | Command | Output | Est. cost (16 thr) |
+|---|---|---|---|---|
+| **Cross-script retrieval (xs)** | work/prep + work/block/<split>/cand_* | `python src/experiments/xscript.py build --split train` then `xscript.py measure` | block/train/xs_<country>.parquet, reports/xscript_recall.json | ≈5 min per country with Indic names; peak ≈4 GB |
+| xs into the pipeline (only if `measure` shows a gain) | both splits built | `xscript.py merge --split train --dst ../work_xs` (and `--split test`), then `BER_WORK_DIR=../work_xs python src/run.py features` / `evaluate` / `predict` | an isolated work dir; base artifacts untouched | merge ≈3 min/split; then a full features + evaluate run |
+| **Re-decode / test diagnostics** | reports/test_A<n>_pairs.parquet (from `run.py predict`) | `python src/experiments/redecode.py diagnose --approach 2` | reports/test_diagnostics_A2.json + table | ~1 min, ~3 GB |
+| Variant submission (no re-scoring) | same | `redecode.py write --approach 2 --tau 0.8 --country-tau France=0.85 --out ../output_variants/<name>` | complete submission dir + decision.json, validator run | ~1 min |
+
+- **xscript.py**: 53% of India blocking misses have an Indic-script target name. anyascii spells "लक्ष्मी" as "lksmi", so every name view fails. This module maps native tokens through the learned dictionary (the same `features_v2.learn_dictionary`, training folds only) and adds a reverse target→S1 view for non-Latin-script targets. It is a no-op for Latin-script countries (US, France). `merge` refits the base vectorizers and asserts that they reproduce the stored cosines before adding new pairs. Pair it with `BER_EXTRA=featx` so the matcher also sees the mapped-name similarity.
+- **redecode.py**: France has no labels, so its decision can only be checked label-free. `diagnose` compares predicted and expected matches per S1 by country (test vs the validation eval fold). `write` produces leaderboard A/B variants, such as a per-country τ, from saved scores in seconds. It never overwrites `output/` (`--out` is required).
+
 ## Suggested allocation across the team machines
 Only the RAM and CPU of these machines matter (no GPU stages).
 1. The machine that already has `work/feat/train`: main A1/A2 evaluation, then decoder lab.
