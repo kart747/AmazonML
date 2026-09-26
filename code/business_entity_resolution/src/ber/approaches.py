@@ -69,15 +69,30 @@ def _with_extras(df: pl.DataFrame, split, folds=None, part_name=None) -> pl.Data
 
 
 def load_xy(split, folds, feats, sub="feat"):
-    """(meta, X, y) for the requested folds; X is a C-contiguous float32 array."""
-    base = [f for f in feats if f not in extra_features()] if sub == "feat" else feats
-    df = (pl.scan_parquet(config.WORK_DIR / sub / split / "*.parquet")
-            .filter(pl.col("fold").is_in(list(folds)))
-            .select(META + ["y"] + base).collect())
-    if sub == "feat":
-        df = _with_extras(df, split, folds)
-    X = np.ascontiguousarray(df.select(feats).to_numpy(), dtype=np.float32)
-    return df.select(META), X, df.get_column("y").to_numpy()
+    """(meta, X, y) for the requested folds; X is a C-contiguous float32 array.
+
+    Filled part by part into a preallocated array, so peak memory is X plus one part
+    (a whole-frame load followed by to_numpy would transiently double it).
+    """
+    extras = extra_features()
+    base = [f for f in feats if f not in extras] if sub == "feat" else feats
+    fl = pl.col("fold").is_in(list(folds))
+    ps = parts(split, sub)
+    sizes = [pl.scan_parquet(p).filter(fl).select(pl.len()).collect().item() for p in ps]
+    X = np.empty((sum(sizes), len(feats)), dtype=np.float32)
+    metas, ys, o = [], [], 0
+    for p, n in zip(ps, sizes):
+        if n == 0:
+            continue
+        df = pl.read_parquet(p, columns=META + ["y"] + base)
+        if sub == "feat" and extras:
+            df = _with_extras(df, split, part_name=p.name)
+        df = df.filter(fl)
+        X[o:o + n] = df.select(feats).to_numpy()
+        metas.append(df.select(META))
+        ys.append(df.get_column("y").to_numpy())
+        o += n
+    return pl.concat(metas), X, np.concatenate(ys)
 
 
 def train_lgb(Xtr, ytr, Xva, yva, feats, name):
