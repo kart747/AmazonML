@@ -18,6 +18,7 @@ Outputs in work/block/<split>/:
                           used for label-free competition features)
 """
 import math
+import os
 from multiprocessing import Pool
 
 import numpy as np
@@ -58,6 +59,26 @@ def fit_transform(vec: TfidfVectorizer, fit_texts, *text_lists):
 
 
 def topk(A: sp.csr_matrix, B: sp.csr_matrix, k: int):
+    """GPU opt-in: BER_TOPK=gpu uses experiments/gpu_topk.topk_gpu (same outputs; needs torch+CUDA,
+    e.g. run under .venv-dense). Any failure (no torch/GPU, CUDA OOM) falls back to the CPU path."""
+    if os.environ.get("BER_TOPK") == "gpu":
+        try:
+            import sys as _sys
+            from pathlib import Path as _P
+            _sys.path.insert(0, str(_P(__file__).resolve().parents[1] / "experiments"))
+            from gpu_topk import topk_gpu
+            return topk_gpu(A, B, k)
+        except Exception as e:  # noqa: BLE001
+            log(f"GPU top-k unavailable ({type(e).__name__}: {str(e)[:120]}); using CPU")
+            try:
+                import torch
+                torch.cuda.empty_cache()
+            except Exception:  # noqa: BLE001
+                pass
+    return _topk_cpu(A, B, k)
+
+
+def _topk_cpu(A: sp.csr_matrix, B: sp.csr_matrix, k: int):
     """Exact row-wise top-k cosine neighbours of A's rows among B's rows (L2-normalized).
 
     B is split into column blocks of `item_block` rows: the sparse top-k kernel keeps a
