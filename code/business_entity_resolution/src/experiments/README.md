@@ -23,7 +23,7 @@ Copy `work/prep/`, `work/block/` and `work/feat/` from the machine that produced
 |---|---|---|---|---|
 | Main A1 / A2 | work/feat/train | `python src/run.py evaluate --approach 1` (or `2`) | reports/eval_A1.json, scores_A1.parquet | A1 ~20 min, A2 ~60 min; 8–12 GB RAM |
 | **Decoder lab** | reports/scores_A<n>.parquet | `python src/experiments/decoder_lab.py --approach 2` | reports/decoders_A2.json + table | ~5 min, ~4 GB |
-| **P-dense** (test-like density) | A<n> models + work/feat/train + work/block/train | `python src/experiments/density.py --approach 2` | reports/density_A2.json | ~20 min, ~8 GB |
+| **P-dense** (test-like density) | A<n> models + work/feat/train + work/block/train | `python src/experiments/density.py --approach 2` | reports/density_A2.json | ~20 min, **13.5 GB peak (measured on A2); run solo** |
 | **LOCO** (France proxy) | work/feat/train | `python src/experiments/loco.py --features context` | reports/loco_context.json | ~30 min, ~8 GB |
 | **Features v2** | work/feat/{train,test} + prep | `python src/experiments/features_v2.py` then `BER_EXTRA=featx BER_TAG=_fx python src/run.py evaluate --approach 2` | work/featx/, reports/eval_A2_fx.json | features ~30 min; eval as main |
 
