@@ -271,6 +271,7 @@ def _score_fold(approach, fold, models):
 def evaluate(approach: int):
     """Fit on TRAIN_FOLDS, choose the decision on TUNE_FOLD, report on EVAL_FOLD."""
     tf, uf, ef = config.TRAIN_FOLDS, config.TUNE_FOLD, config.EVAL_FOLD
+    (config.WORK_DIR / "reports").mkdir(parents=True, exist_ok=True)
     with stage(f"evaluate_A{approach}{TAG}"):
         if approach == 1:
             feats = PAIR_FEATURES + extra_features()
