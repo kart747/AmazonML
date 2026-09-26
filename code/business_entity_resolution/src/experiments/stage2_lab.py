@@ -156,8 +156,8 @@ def _extra_cols(split):
     return [c for c in cols if c not in known]
 
 
-def variant_feats(variant, split="train"):
-    extra = _extra_cols(split)
+def variant_feats(variant, split="train", drop=()):
+    extra = [c for c in _extra_cols(split) if c not in drop]
     return {"base": S2_FEATS, "new": S2_FEATS + NEW_FEATS, "featx": S2_FEATS + extra,
             "all": S2_FEATS + NEW_FEATS + extra}[variant]
 
@@ -172,10 +172,10 @@ def load(split, folds, feats, base=None):
     return df.select(["rid", "gid", "fold"] + (["y"] if split == "train" else [])), X
 
 
-def evaluate(variant, tag, params_over, train_folds=None, more_train=()):
+def evaluate(variant, tag, params_over, train_folds=None, more_train=(), drop=()):
     """more_train: other work dirs whose s2lab/train rows (any fold) are added to the training set;
     they must hold only S1 folds disjoint from the tune/eval folds (e.g. BER_QUERY_FOLDS=4..9)."""
-    feats = variant_feats(variant)
+    feats = [f for f in variant_feats(variant, drop=drop) if f not in drop]
     name = f"s2lab_{variant}{tag}"
     tf, uf, ef = train_folds or config.TRAIN_FOLDS, config.TUNE_FOLD, config.EVAL_FOLD
     params = dict(config.LGB_PARAMS, **params_over)
@@ -257,13 +257,15 @@ def main():
     ap.add_argument("--params", default="{}", help='JSON LightGBM overrides, e.g. {"learning_rate":0.04}')
     ap.add_argument("--out", default=None)
     ap.add_argument("--train-folds", default="", help="override TRAIN_FOLDS, e.g. 1 (learning curve)")
+    ap.add_argument("--drop", default="", help="comma-separated feature columns to exclude, e.g. dn_cos")
     ap.add_argument("--more-train", default="", help="comma-separated extra work dirs with s2lab/train")
     a = ap.parse_args()
     if a.cmd == "build":
         build(a.split, [s for s in a.extra.split(",") if s])
     elif a.cmd == "evaluate":
         tfs = tuple(int(x) for x in a.train_folds.split(",") if x) or None
-        evaluate(a.variant, a.tag, json.loads(a.params), tfs, [d for d in a.more_train.split(",") if d])
+        evaluate(a.variant, a.tag, json.loads(a.params), tfs, [d for d in a.more_train.split(",") if d],
+                 [c for c in a.drop.split(",") if c])
     else:
         assert a.out, "--out is required (never overwrite output/)"
         predict(a.variant, a.tag, a.out)
