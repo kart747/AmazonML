@@ -162,8 +162,8 @@ def variant_feats(variant, split="train"):
             "all": S2_FEATS + NEW_FEATS + extra}[variant]
 
 
-def load(split, folds, feats):
-    lf = pl.scan_parquet(config.WORK_DIR / OUT / split / "*.parquet")
+def load(split, folds, feats, base=None):
+    lf = pl.scan_parquet((Path(base) if base else config.WORK_DIR) / OUT / split / "*.parquet")
     if folds is not None:
         lf = lf.filter(pl.col("fold").is_in(list(folds)))
     cols = ["rid", "gid", "fold"] + (["y"] if split == "train" else []) + feats
@@ -172,13 +172,21 @@ def load(split, folds, feats):
     return df.select(["rid", "gid", "fold"] + (["y"] if split == "train" else [])), X
 
 
-def evaluate(variant, tag, params_over):
+def evaluate(variant, tag, params_over, train_folds=None, more_train=()):
+    """more_train: other work dirs whose s2lab/train rows (any fold) are added to the training set;
+    they must hold only S1 folds disjoint from the tune/eval folds (e.g. BER_QUERY_FOLDS=4..9)."""
     feats = variant_feats(variant)
     name = f"s2lab_{variant}{tag}"
-    tf, uf, ef = config.TRAIN_FOLDS, config.TUNE_FOLD, config.EVAL_FOLD
+    tf, uf, ef = train_folds or config.TRAIN_FOLDS, config.TUNE_FOLD, config.EVAL_FOLD
     params = dict(config.LGB_PARAMS, **params_over)
     with stage(f"{name}_evaluate"):
         mtr, Xtr = load("train", tf, feats)
+        for d in more_train:
+            m2, X2 = load("train", None, feats, base=d)
+            assert not set(m2.get_column("fold").unique().to_list()) & {uf, ef}, "extra dir overlaps tune/eval folds"
+            mtr, Xtr = pl.concat([mtr, m2]), np.concatenate([Xtr, X2])
+            del X2
+        log(f"training rows {len(mtr):,} (folds {sorted(mtr.get_column('fold').unique().to_list())})")
         mtu, Xtu = load("train", [uf], feats)
         dtr = lgb.Dataset(Xtr, mtr.get_column("y").to_numpy(), feature_name=feats, free_raw_data=True)
         dva = lgb.Dataset(Xtu, mtu.get_column("y").to_numpy(), reference=dtr)
@@ -200,6 +208,7 @@ def evaluate(variant, tag, params_over):
         keep = decide(p_ev, g_ev, variant_d, tau, ex_ev)
         imp = dict(zip(feats, m.feature_importance("gain").round().astype(int).tolist()))
         res = {"variant": variant, "tag": tag, "n_features": len(feats), "params_override": params_over,
+               "train_folds": sorted(mtr.get_column("fold").unique().to_list()), "train_rows": len(mtr),
                "best_iteration": m.best_iteration, "valid_logloss": m.best_score["valid_0"]["binary_logloss"],
                "decision": {"variant": variant_d, "tau": tau, "tune_f05": choice[variant_d]["tune_f05"], "all": choice},
                "eval": ev.report(keep), "eval_pairs_scored": int(len(y_ev)),
@@ -247,11 +256,14 @@ def main():
     ap.add_argument("--tag", default="")
     ap.add_argument("--params", default="{}", help='JSON LightGBM overrides, e.g. {"learning_rate":0.04}')
     ap.add_argument("--out", default=None)
+    ap.add_argument("--train-folds", default="", help="override TRAIN_FOLDS, e.g. 1 (learning curve)")
+    ap.add_argument("--more-train", default="", help="comma-separated extra work dirs with s2lab/train")
     a = ap.parse_args()
     if a.cmd == "build":
         build(a.split, [s for s in a.extra.split(",") if s])
     elif a.cmd == "evaluate":
-        evaluate(a.variant, a.tag, json.loads(a.params))
+        tfs = tuple(int(x) for x in a.train_folds.split(",") if x) or None
+        evaluate(a.variant, a.tag, json.loads(a.params), tfs, [d for d in a.more_train.split(",") if d])
     else:
         assert a.out, "--out is required (never overwrite output/)"
         predict(a.variant, a.tag, a.out)

@@ -22,6 +22,8 @@ TRAIN_FOLDS = (1, 2)   # model fitting
 TUNE_FOLD = 3          # early stopping + threshold selection
 EVAL_FOLD = 0          # reported score (never used for any choice)
 QUERY_FOLDS = (0, 1, 2, 3)  # train S1 folds that are retrieved/scored
+if os.environ.get("BER_QUERY_FOLDS"):  # e.g. "4,5,6,7,8,9" for extra stage-2 training data (isolated work dir)
+    QUERY_FOLDS = tuple(int(x) for x in os.environ["BER_QUERY_FOLDS"].split(","))
 
 # ---- blocking (candidate generation) ----
 BLOCK = dict(
