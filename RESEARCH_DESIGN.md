@@ -161,6 +161,8 @@ Public leaderboard snapshot (user, 26 Sep ~21:40): ranks 4–30 all score **0.98
 3. Prioritize candidate recall (cross-script xs and dense dn views, parallel session).
 4. Leaderboard slots are scarce (5/day) and the public board is a subset. Use them to test hypotheses (e.g. strict vs loose τ), not to hill-climb.
 
+**Leaderboard teams' own repos (searched 26 Sep 22:10):** none found. All 26 team names on the user's snapshot (ranks 4–30) were checked against about 290 collected READMEs and GitHub repo search (name/description/README, created ≥15 Sep). Every hit was unrelated (printf libraries, "medallion" data pipelines, API spam). The only name-like match, MAVERICK-111/Amazon_ML_2026 (32 KB plan + HNSW scaffold, Apache-2.0, last push 15:29 IST), states no team name or score, so it is unconfirmed. Inferred: the 0.988–0.990 teams keep their code private. The best public evidence remains Ayan (validation 0.987, no leaderboard score) and the leaderboard-gap reports above.
+
 ### 2.5 Fair-play and licensing position
 - **None** of the competitor repos has a license (default: all rights reserved), and the organisers screen for plagiarism. **We use them for ideas and measured facts only. No code is copied.** Everything we build is written from scratch.
 - A repo named `TANISHQDAS/matching_results` (38 MB) appears to publish outputs. **Never download or use other teams' predictions.**
