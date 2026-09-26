@@ -7,7 +7,9 @@ Evidence:
 - [M] ours: 53% of India blocking misses have an Indic-script target name.
 - [S] Karthikatstuffmama (3% dev slice): e5-small dense top-15 unioned with key blocking raised
   recall from 0.974 to 0.993 and holdout F0.5 by +0.0065 (India +0.0128); denser non-Latin retrieval
-  (rank 50) added a little more. Dev-slice absolutes are optimistic; only deltas are comparable.
+  (rank 50) added +0.0003 because non-Latin misses had median dense rank 29. Dev-slice absolutes are
+  optimistic; only deltas are comparable. So retrieve to k=50 and pick the merge cap
+  (xscript.py merge --cap dn=K) from the recall-by-k that `measure` reports.
 
 Model: intfloat/multilingual-e5-small (MIT licence, 118M parameters; the challenge allows
 MIT/Apache ≤8B). Pretrained weights are downloaded once from Hugging Face. No business data
@@ -17,7 +19,7 @@ script, which the model understands); mean pooling, L2-normalized, fp16.
 Scope: by default only targets whose raw name has a non-Latin letter (the measured gap),
 against ALL S1 of the country. Use `--scope all` for every target (≈20M texts per split, hours).
 
-  python src/experiments/dense_view.py build --split train [--k 15] [--scope nonlatin|all]
+  python src/experiments/dense_view.py build --split train [--k 50] [--scope nonlatin|all]
       -> work/dense/<split>/{s1,tg}_<country>.npy (+ _ids.npy; embeddings, resumable)
          work/block/<split>/dn_<country>.parquet  (rid, gid, r_dn, s_dn)
   python src/experiments/dense_view.py features --split train     (after run.py features)
@@ -225,7 +227,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cmd", choices=["build", "features"])
     ap.add_argument("--split", choices=["train", "test"], default="train")
-    ap.add_argument("--k", type=int, default=15)
+    ap.add_argument("--k", type=int, default=50, help="retrieval depth; choose the merge cap from `measure`")
     ap.add_argument("--scope", choices=["nonlatin", "all"], default="nonlatin")
     a = ap.parse_args()
     if a.cmd == "build":

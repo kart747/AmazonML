@@ -165,7 +165,7 @@ def measure(countries=None, views=("xs",)):
         per_view = {}
         for r in rcols:
             per_view[r[2:]] = {k: round(float((ib | (h.get_column(r) < k).fill_null(False)).mean()), 5)
-                               for k in (1, 2, 4, 8, 15, 30) if k <= int(vp.get_column(r).max() or 0) + 1}
+                               for k in (1, 2, 4, 8, 15, 30, 50) if k <= int(vp.get_column(r).max() or 0) + 1}
         rep[c] = {
             "true_pairs": h.height,
             "base_recall": round(float(ib.mean()), 5),
