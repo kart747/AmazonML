@@ -237,9 +237,11 @@ def make_evaluator(meta: pl.DataFrame, y, fold: int):
     return Evaluator(idx.get_column("idx").to_numpy(), y, pop.get_column("n_true").to_numpy())
 
 
-def choose_decision(ev: Evaluator, p, gid):
-    """Grid-search tau for plain and exclusive decisions on the tuning fold."""
-    excl = exclusive_mask(gid, p)
+def choose_decision(ev: Evaluator, p, gid, excl=None):
+    """Grid-search tau for plain and exclusive decisions on the tuning fold.
+
+    `excl` may be precomputed over a larger scored graph than this fold (see evaluate)."""
+    excl = exclusive_mask(gid, p) if excl is None else excl
     best = {}
     for variant, base in (("threshold", np.ones_like(excl)), ("threshold+excl", excl)):
         scores = [(ev.macro_f05(base & (p >= t)), t) for t in config.THRESHOLD_GRID]
@@ -249,10 +251,10 @@ def choose_decision(ev: Evaluator, p, gid):
     return best
 
 
-def decide(p, gid, variant, tau):
+def decide(p, gid, variant, tau, excl=None):
     keep = p >= tau
     if variant == "threshold+excl":
-        keep &= exclusive_mask(gid, p)
+        keep &= exclusive_mask(gid, p) if excl is None else excl
     return keep
 
 
@@ -288,22 +290,27 @@ def evaluate(approach: int):
         importance = dict(zip(feats, m.feature_importance("gain").round().astype(int).tolist()))
 
         meta_tu, y_tu, p_tu = _score_fold(approach, uf, m)
-        choice = choose_decision(make_evaluator(meta_tu, y_tu, uf), p_tu, meta_tu.get_column("gid").to_numpy())
+        meta_ev, y_ev, p_ev = _score_fold(approach, ef, m)
+        g_tu, g_ev = meta_tu.get_column("gid").to_numpy(), meta_ev.get_column("gid").to_numpy()
+        # Exclusivity over the union of both out-of-sample folds: on test a target competes
+        # with every S1 of its country, so a single-fold graph under-states exclusivity.
+        # (Still covers only 20% of S1; training-fold scores are in-sample and not used.)
+        excl_all = exclusive_mask(np.r_[g_tu, g_ev], np.r_[p_tu, p_ev])
+        excl_tu, excl_ev = excl_all[:len(g_tu)], excl_all[len(g_tu):]
+        choice = choose_decision(make_evaluator(meta_tu, y_tu, uf), p_tu, g_tu, excl_tu)
         variant = max(choice, key=lambda v: choice[v]["tune_f05"])
         tau = choice[variant]["tau"]
         other = "threshold" if variant != "threshold" else "threshold+excl"
 
-        meta_ev, y_ev, p_ev = _score_fold(approach, ef, m)
         ev = make_evaluator(meta_ev, y_ev, ef)
-        g_ev = meta_ev.get_column("gid").to_numpy()
-        keep = decide(p_ev, g_ev, variant, tau)
+        keep = decide(p_ev, g_ev, variant, tau, excl_ev)
         res = {
             "approach": approach,
             "n_features": len(feats),
             "decision_selected_on_tune_fold": {"variant": variant, "tau": tau, "all": choice},
             "eval_fold": ef,
             "eval": ev.report(keep),
-            f"eval_{other}": ev.report(decide(p_ev, g_ev, other, choice[other]["tau"])),
+            f"eval_{other}": ev.report(decide(p_ev, g_ev, other, choice[other]["tau"], excl_ev)),
             "eval_blocking_oracle": ev.report(y_ev == 1),
             "eval_candidate_pairs": int(len(y_ev)),
             "feature_gain_top20": dict(sorted(importance.items(), key=lambda kv: -kv[1])[:20]),

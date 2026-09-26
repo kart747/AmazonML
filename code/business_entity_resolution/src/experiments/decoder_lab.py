@@ -52,9 +52,11 @@ def main():
                           gid=d.get_column("gid").to_numpy(), src=d.get_column("src").to_numpy(),
                           y=d.get_column("y").to_numpy())
     cal = Calibrator().fit(data["tune"]["p"], data["tune"]["y"])
+    # exclusivity over the union of both out-of-sample folds (same as run.py evaluate)
+    ex = exclusive(np.r_[data["tune"]["gid"], data["eval"]["gid"]], np.r_[data["tune"]["p"], data["eval"]["p"]])
+    data["tune"]["excl"], data["eval"]["excl"] = ex[:len(data["tune"]["p"])], ex[len(data["tune"]["p"]):]
     for d in data.values():
         d["pc"] = cal(d["p"]).astype(np.float64)
-        d["excl"] = exclusive(d["gid"], d["p"])
 
     taus = config.THRESHOLD_GRID
     decoders = {

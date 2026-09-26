@@ -107,8 +107,12 @@ def build_features(split: str):
     fdir.mkdir(parents=True, exist_ok=True)
     s1 = pl.read_parquet(pdir / f"s1_{split}.parquet", columns=["rid", "fold", "country", "nm", "ad", "cat"])
     tg = pl.read_parquet(pdir / f"tg_{split}.parquet", columns=["gid", "src", "name", "nm", "ad", "cat"])
-    # name ambiguity: number of S1 records (same country) sharing a normalized name
-    freq = s1.group_by(["country", "nm"]).len("nm_freq")
+    # name ambiguity: S1 records (same country) sharing a normalized name, as a rate per
+    # 1M S1 of the country. Raw counts would shift between splits/countries (US S1: 1.32M
+    # train vs 663k test; France 259k), making names look less ambiguous at test time.
+    freq = (s1.group_by(["country", "nm"]).len("nm_freq")
+              .join(s1.group_by("country").len("n_country"), on="country")
+              .with_columns(nm_freq=pl.col("nm_freq") * 1e6 / pl.col("n_country")).drop("n_country"))
     gt = pl.read_parquet(pdir / "gt_train.parquet").with_columns(y=pl.lit(1, pl.Int8)) if split == "train" else None
 
     for cf in sorted(bdir.glob("cand_*.parquet")):

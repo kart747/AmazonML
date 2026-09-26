@@ -60,7 +60,11 @@ def main():
     dropped = s1.select("rid").filter(pl.Series(rng.random(s1.height) < a.drop))
     kept = s1.join(dropped, on="rid", how="anti")
     log(f"dropping {dropped.height:,} of {s1.height:,} S1 ({a.drop:.0%})")
-    freq_name = kept.group_by(["country", "nm"]).len("t_nm_freq").rename({"nm": "t_nm"})
+    # same definition as features.py: rate per 1M S1 of the country (here: of the kept pool)
+    freq_name = (kept.group_by(["country", "nm"]).len("t_nm_freq")
+                     .join(kept.group_by("country").len("n_c"), on="country")
+                     .with_columns(t_nm_freq=pl.col("t_nm_freq") * 1e6 / pl.col("n_c"))
+                     .drop("n_c").rename({"nm": "t_nm"}))
     freq_rid = kept.join(freq_name.rename({"t_nm": "nm", "t_nm_freq": "q_nm_freq"}), on=["country", "nm"]) \
         .select("rid", "country", "q_nm_freq")
     tg = pl.read_parquet(W / "prep" / "tg_train.parquet", columns=["gid", "src", "nm", "ad"])
@@ -121,15 +125,18 @@ def main():
                          prob[m], mf.get_column("gid").to_numpy())
         ev_tu, p_tu, g_tu = res["tune"]
         ev_ev, p_ev, g_ev = res["eval"]
-        choice = choose_decision(ev_tu, p_tu, g_tu)
+        from ber.approaches import exclusive_mask
+        ex = exclusive_mask(np.r_[g_tu, g_ev], np.r_[p_tu, p_ev])
+        ex_tu, ex_ev = ex[:len(g_tu)], ex[len(g_tu):]
+        choice = choose_decision(ev_tu, p_tu, g_tu, ex_tu)
         variant = max(choice, key=lambda v: choice[v]["tune_f05"])
         normal = __import__("json").load(open(W / "reports" / f"eval_A{a.approach}{TAG}.json"))
         n_var, n_tau = normal["decision_selected_on_tune_fold"]["variant"], normal["decision_selected_on_tune_fold"]["tau"]
         out = {
             "drop_frac": a.drop, "dropped_s1": dropped.height,
             "dense_selected": {"variant": variant, "tau": choice[variant]["tau"], "all": choice},
-            "eval_dense_with_dense_tau": ev_ev.report(decide(p_ev, g_ev, variant, choice[variant]["tau"])),
-            "eval_dense_with_normal_tau": ev_ev.report(decide(p_ev, g_ev, n_var, n_tau)),
+            "eval_dense_with_dense_tau": ev_ev.report(decide(p_ev, g_ev, variant, choice[variant]["tau"], ex_ev)),
+            "eval_dense_with_normal_tau": ev_ev.report(decide(p_ev, g_ev, n_var, n_tau, ex_ev)),
             "normal_eval_f05": normal["eval"]["macro_f05"], "normal_tau": n_tau,
         }
     save_json(out, W / "reports" / f"density_A{a.approach}{TAG}.json")
