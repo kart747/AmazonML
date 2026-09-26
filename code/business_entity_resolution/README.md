@@ -6,10 +6,21 @@ pair features → LightGBM matcher → F0.5-tuned decision with target exclusivi
 CPU only. No external data, APIs or pretrained models.
 
 ## Setup
-Python 3.11.
+**Python 3.11 or newer** (the pinned numpy 2.4 does not install on 3.10). Linux, macOS and Windows are supported.
 ```bash
-python -m venv .venv && .venv/bin/pip install -r requirements.txt
+python -m venv .venv && .venv/bin/pip install -r requirements.txt      # Windows: .venv\Scripts\pip ...
 ```
+**The dataset is not in git.** Unzip the challenge `student_resource/` into the repository root
+(`<repo>/student_resource/dataset/{train,test}`), or point to it with environment variables:
+```bash
+export BER_DATA_DIR=/path/to/student_resource/dataset                     # Linux/macOS
+export BER_VALIDATOR=/path/to/student_resource/utils/validate_submission.py
+```
+```powershell
+$env:BER_DATA_DIR = "C:\path\to\student_resource\dataset"              # Windows PowerShell
+$env:BER_VALIDATOR = "C:\path\to\student_resource\utils\validate_submission.py"
+```
+Quick check that everything works (synthetic data, about 2 min): `python tests/test_smoke.py`.
 Paths default to the challenge layout next to this repo. Override them with environment variables:
 `BER_DATA_DIR` (folder with `train/` and `test/`), `BER_WORK_DIR` (artifacts, ~30 GB),
 `BER_OUT_DIR` (submission files), `BER_VALIDATOR` (official `validate_submission.py`),

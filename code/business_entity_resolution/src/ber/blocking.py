@@ -29,7 +29,12 @@ from sparse_dot_topn import sp_matmul_topn
 from . import config
 from .utils import done, log, mark_done, save_json, stage
 
-_VEC = None  # vectorizer shared with forked workers
+_VEC = None  # vectorizer held by each worker process (set by _init_worker)
+
+
+def _init_worker(vec):
+    global _VEC
+    _VEC = vec
 
 
 def _transform_chunk(texts):
@@ -37,17 +42,18 @@ def _transform_chunk(texts):
 
 
 def fit_transform(vec: TfidfVectorizer, fit_texts, *text_lists):
-    """Fit on a sample, then transform each list in parallel (fork shares the vectorizer)."""
-    global _VEC
+    """Fit on a sample, then transform each list in parallel.
+
+    The fitted vectorizer is handed to workers through the pool initializer, so this
+    works with both 'fork' (Linux) and 'spawn' (Windows, macOS) start methods.
+    """
     vec.fit(fit_texts)
-    _VEC = vec
     out = []
-    with Pool(config.N_THREADS) as p:
+    with Pool(config.N_THREADS, initializer=_init_worker, initargs=(vec,)) as p:
         for texts in text_lists:
             step = max(1000, math.ceil(len(texts) / (config.N_THREADS * 4)))
             parts = p.map(_transform_chunk, [texts[i:i + step] for i in range(0, len(texts), step)])
             out.append(sp.vstack(parts).tocsr().astype(np.float32))
-    _VEC = None
     return out
 
 
