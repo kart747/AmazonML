@@ -66,6 +66,8 @@ def test_end_to_end():
         print(run_exp("decoder_lab.py", "--approach", "2")[-1500:])
         run_exp("density.py", "--approach", "2")
         assert (tmp / "work" / "reports" / "density_A2.json").exists()
+        run_exp("error_analysis.py", "--approach", "2")
+        assert (tmp / "work" / "reports" / "errors_A2.md").exists()
         run_exp("loco.py", "--features", "context")
         assert (tmp / "work" / "reports" / "loco_context.json").exists()
 
