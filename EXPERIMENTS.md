@@ -190,3 +190,23 @@ Test pred/S1 rises by +0.03 to +0.045 and Σp by +0.065, but the density simulat
 Expected local-to-LB drop is at least 0.003. An LB score near 0.97 would point to harder orphans.
 
 **Cost:** density.py peaked at **13.5 GB RSS** in 9.5 min (its README says ~8 GB), and it pushed the shared box 4 GB into swap. Run it as a solo job.
+
+## E-M3. Stage-2 lab: pruned stage 2 + new feature sets (session 5e; `src/experiments/stage2_lab.py`)
+Same protocol as E-M1: train folds {1,2}, early stopping, variant choice and τ on tune fold 3, reported on eval fold 0. Stage-2 rows are cascade-pruned to p1 ≥ 1e-3 (E-M2): 2.07M training rows instead of 18.2M. All other rows are rejected. Stage-1 models and p1 are the unchanged A2 ones. Extra columns are hstacked row-aligned from work/featx (features_v2.py, first real-data run) and computed in stage2_lab.augment (17 "new" p1-aware features: cluster support vs the S1's confident set, identical twins, per-source p1 rank, space-stripped name, exact/contained address, target-name OOV share). dn_cos is excluded (`--drop dn_cos`; 5d owns that ablation).
+
+| variant | features | tune F0.5 | eval F0.5 | macro P | macro R | FP pairs | singleton acc | F0.5 (1 true) | pred/S1 | iters | fit RSS |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| A2 (E-M1, reference) | 54 | 0.98055 | 0.98045 | 0.99334 | 0.95898 | 4,661 | 0.9801 | 0.9293 | 3.344 | 816 | 9.8 GB |
+| s2lab_base (pruned, same 54) | 54 | 0.98073 | 0.98047 | 0.99331 | 0.95946 | 4,755 | 0.9818 | – | 3.347 | 645 | 1.5 GB |
+| s2lab_base, fold 1 only (learning curve) | 54 | 0.98010 | 0.97987 | 0.99332 | 0.95812 | 4,817 | 0.9832 | – | 3.343 | 289 | 1.4 GB |
+| s2lab_new | 71 | 0.98182 | 0.98145 | 0.99413 | 0.96077 | 4,137 | 0.9849 | – | 3.350 | 921 | 1.4 GB |
+| s2lab_featx | 75 | 0.98549 | 0.98527 | 0.99634 | 0.96505 | 2,572 | 0.9896 | 0.9467 | 3.356 | 830 | 1.8 GB |
+| s2lab_all (new + featx) | 92 | **0.98579** | **0.98550** | 0.99686 | 0.96487 | **2,142** | 0.9908 | – | 3.354 | 690 | 1.6 GB |
+
+Reading:
+- The cascade prune is lossless (base ≥ A2 on both folds).
+- Stage 2 is data-limited: halving the training data costs 0.0006 on tune. This motivates the reserve folds 4–9 (`block_more_folds.py`, chain_f49; this uses up the audit reserve, noted in SUBMISSIONS).
+- featx is the big gain (+0.0048 tune over base, FP −46%). Top featx gains: t_unm_maxidf, q_unm_maxidf (IDF of the rarest one-sided name token, which is exactly the orphan-lookalike signature from E-M2), n_map_ratio, t_match_idf. All are label-free, except that the transliteration dictionary is learned from train-fold labels only.
+- all vs featx is only +0.0003 on tune, below the +0.001 gate. The tie is broken by the density simulation (the "new" features target orphan lookalikes). **Eval fold 0 is not used for this choice.**
+- Status: [REAL DATA TESTED] [MACRO F0.5 VERIFIED on fold 0] for all rows. Density check and test predictions are pending (chain_5f).
+- Runtime note: a concurrent LightGBM fit with 16 OpenMP threads each (two jobs, 16 cores) slowed both about 10× (spin-wait contention). Concurrent fits now use BER_THREADS≤8 and OMP_WAIT_POLICY=PASSIVE.
