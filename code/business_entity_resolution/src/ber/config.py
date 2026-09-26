@@ -32,7 +32,7 @@ BLOCK = dict(
     k_addr=5,
     k_combo=10,
     k_rev=8,                # target -> S1 top-K (reverse view)
-    chunk=100_000,          # query rows per sparse top-K matmul call
+    item_block=65_536,      # items per column block in top-K matmul (cache locality)
 )
 
 # ---- models ----
