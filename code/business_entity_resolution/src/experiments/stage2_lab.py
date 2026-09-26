@@ -40,6 +40,7 @@ import polars as pl
 from rapidfuzz import fuzz, process
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ber import config  # noqa: E402
 from ber.approaches import (S2_FEATS, _pred, choose_decision, decide, exclusive_mask,  # noqa: E402
                             make_evaluator, run_validator, write_submission)
@@ -247,9 +248,96 @@ def predict(variant, tag, out_dir):
     return run_validator()
 
 
+def density(names, extras, drop_frac=0.19):
+    """P-dense for s2lab models: same S1 drop as density.py (seed, 19%), pool-dependent context
+    recomputed, stage 1 -> stage-2 features -> augment/prune -> each s2lab model; tau re-chosen
+    on the dense tune fold, reported on the dense eval fold (and with the normal tau)."""
+    from density import dense_context
+    from ber.approaches import P1_FEATURES, S1_FEATS, add_stage2_features, load_model, parts
+    from ber.metric import Evaluator
+    WD, folds = config.WORK_DIR, [config.TUNE_FOLD, config.EVAL_FOLD]
+    s1 = pl.read_parquet(WD / "prep" / "s1_train.parquet", columns=["rid", "fold", "country", "nm", "ad"])
+    rng = np.random.default_rng(config.SEED)
+    dropped = s1.select("rid").filter(pl.Series(rng.random(s1.height) < drop_frac))
+    kept = s1.join(dropped, on="rid", how="anti")
+    freq_name = (kept.group_by(["country", "nm"]).len("t_nm_freq")
+                     .join(kept.group_by("country").len("n_c"), on="country")
+                     .with_columns(t_nm_freq=pl.col("t_nm_freq") * 1e6 / pl.col("n_c"))
+                     .drop("n_c").rename({"nm": "t_nm"}))
+    freq_rid = kept.join(freq_name.rename({"t_nm": "nm", "t_nm_freq": "q_nm_freq"}), on=["country", "nm"]) \
+        .select("rid", "country", "q_nm_freq")
+    need = (pl.scan_parquet(WD / "feat" / "train" / "*.parquet").filter(pl.col("fold").is_in(folds))
+              .select("gid").unique().collect())
+    revs = []
+    for f in sorted((WD / "block" / "train").glob("rev_*.parquet")):
+        r = pl.read_parquet(f).join(need, on="gid", how="semi").join(dropped, on="rid", how="anti")
+        revs.append(r.with_columns(rrank=pl.col("rscore").rank("ordinal", descending=True).over("gid") - 1))
+    rev = pl.concat(revs).filter(pl.col("rrank") < config.BLOCK["k_rev"])
+    del revs
+    rev_rank = rev.select("gid", "rid", r_rev="rrank")
+    rev_sum = (rev.sort(["gid", "rrank"]).group_by("gid", maintain_order=True)
+                  .agg(t_best_rid=pl.col("rid").first(), t_top1=pl.col("rscore").first(),
+                       t_top2=pl.col("rscore").get(1, null_on_oob=True)))
+    del rev
+    tgx = target_table("train")
+    tg = tgx.select("gid", src="_src", nm="_tnm", ad="_tad")
+    tg_nm = tg.select("gid", t_nm="nm")
+    s1x = s1.select("rid", "nm", "ad")
+    m_a, m_b = load_model("A2_stage1_foldA"), load_model("A2_stage1_foldB")
+    models = {n: lgb.Booster(model_file=str(WD / "models" / f"{n}.txt")) for n in names}
+    metas, ys, ps = [], [], {n: [] for n in names}
+    with stage("s2lab_density"):
+        for p in parts("train"):
+            df = pl.read_parquet(p)
+            df = hstack_extras(df, "train", p.name, extras)
+            df = df.filter(pl.col("fold").is_in(folds)).join(dropped, on="rid", how="anti")
+            if df.height == 0:
+                continue
+            cols = df.columns
+            df = dense_context(df, rev_rank, rev_sum, freq_rid, freq_name, tg_nm).select(cols)
+            X = np.ascontiguousarray(df.select(S1_FEATS).to_numpy(), dtype=np.float32)
+            df = add_stage2_features(df.with_columns(p1=pl.Series(0.5 * (_pred(m_a, X) + _pred(m_b, X)))), tg)
+            del X
+            df = augment(df, tgx, s1x)
+            for n, m in models.items():
+                ps[n].append(_pred(m, np.ascontiguousarray(df.select(m.feature_name()).to_numpy(), dtype=np.float32)))
+            metas.append(df.select("rid", "gid", "fold"))
+            ys.append(df.get_column("y").to_numpy())
+            log(f"density {p.name}: {df.height:,} pruned pairs")
+    meta, y = pl.concat(metas), np.concatenate(ys)
+    gt = pl.read_parquet(WD / "prep" / "gt_train.parquet").group_by("rid").len("n_true")
+    evs = {}
+    for fold in folds:
+        msk = (meta.get_column("fold") == fold).to_numpy()
+        mf = meta.filter(pl.Series(msk))
+        pop = (s1.filter(pl.col("fold") == fold).join(dropped, on="rid", how="anti").select("rid")
+                 .join(gt, on="rid", how="left").with_columns(pl.col("n_true").fill_null(0)).with_row_index("idx"))
+        idx = mf.select("rid").join(pop.select("rid", "idx"), on="rid", how="left", maintain_order="left")
+        evs[fold] = (msk, Evaluator(idx.get_column("idx").to_numpy(), y[msk], pop.get_column("n_true").to_numpy()),
+                     mf.get_column("gid").to_numpy())
+    out = {"drop_frac": drop_frac, "dropped_s1": dropped.height}
+    for n in names:
+        pr = np.concatenate(ps[n])
+        (mt, ev_tu, g_tu), (me, ev_ev, g_ev) = evs[config.TUNE_FOLD], evs[config.EVAL_FOLD]
+        ex = exclusive_mask(np.r_[g_tu, g_ev], np.r_[pr[mt], pr[me]])
+        ex_tu, ex_ev = ex[:len(g_tu)], ex[len(g_tu):]
+        ch = choose_decision(ev_tu, pr[mt], g_tu, ex_tu)
+        v = max(ch, key=lambda k: ch[k]["tune_f05"])
+        normal = json.load(open(WD / "reports" / f"{n}.json"))["decision"]
+        out[n] = {"dense_tune": {"variant": v, "tau": ch[v]["tau"], "tune_f05": ch[v]["tune_f05"]},
+                  "eval_dense_dense_tau": ev_ev.report(decide(pr[me], g_ev, v, ch[v]["tau"], ex_ev)),
+                  "eval_dense_normal_tau": ev_ev.report(decide(pr[me], g_ev, normal["variant"], normal["tau"], ex_ev)),
+                  "normal_tau": normal["tau"]}
+        e, e2 = out[n]["eval_dense_dense_tau"], out[n]["eval_dense_normal_tau"]
+        log(f"DENSITY {n}: dense tune {ch[v]['tune_f05']} (tau {ch[v]['tau']}) | eval dense-tau {e['macro_f05']} "
+            f"FP {e['false_positive_pairs']} | eval normal-tau {e2['macro_f05']} FP {e2['false_positive_pairs']} "
+            f"pairs/S1 {e2['predicted_pairs_per_s1']}")
+    save_json(out, WD / "reports" / "s2lab_density.json")
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["build", "evaluate", "predict"])
+    ap.add_argument("cmd", choices=["build", "evaluate", "predict", "density"])
     ap.add_argument("--split", default="train")
     ap.add_argument("--extra", default="", help="comma-separated row-aligned feature sets, e.g. featx")
     ap.add_argument("--variant", default="new")
@@ -266,6 +354,8 @@ def main():
         tfs = tuple(int(x) for x in a.train_folds.split(",") if x) or None
         evaluate(a.variant, a.tag, json.loads(a.params), tfs, [d for d in a.more_train.split(",") if d],
                  [c for c in a.drop.split(",") if c])
+    elif a.cmd == "density":
+        density([f"s2lab_{v}" for v in a.variant.split(",")], [x for x in a.extra.split(",") if x])
     else:
         assert a.out, "--out is required (never overwrite output/)"
         predict(a.variant, a.tag, a.out)
