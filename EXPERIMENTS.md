@@ -210,3 +210,32 @@ Reading:
 - all vs featx is only +0.0003 on tune, below the +0.001 gate. The tie is broken by the density simulation (the "new" features target orphan lookalikes). **Eval fold 0 is not used for this choice.**
 - Status: [REAL DATA TESTED] [MACRO F0.5 VERIFIED on fold 0] for all rows. Density check and test predictions are pending (chain_5f).
 - Runtime note: a concurrent LightGBM fit with 16 OpenMP threads each (two jobs, 16 cores) slowed both about 10× (spin-wait contention). Concurrent fits now use BER_THREADS≤8 and OMP_WAIT_POLICY=PASSIVE.
+
+## E-X1. Cross-script candidate views: xs (learned dictionary) and dn (e5 dense), train side (parallel track)
+**Recall** (India, train query folds 0–3, 353,705 S1, 1,226,641 true pairs; base pair recall 0.97315, 32,933 misses). `xscript.py measure` plus a cap sweep. Both views are reverse (target→S1) and cover only targets with a non-Latin-script name (752,869 India train targets).
+
+| added to base | new pairs | new/S1 | misses recovered | India pair recall |
+|---|---|---|---|---|
+| dn rank<1 | 71,802 | 0.20 | 5,923 | 0.97798 |
+| dn rank<4 | 892,702 | 2.52 | 8,630 | 0.98019 |
+| dn rank<50 | 14.58M | 41.2 | 12,665 | 0.98348 |
+| xs rank<1 | – | – | – | 0.98368 |
+| **xs rank<2 ∪ dn rank<1** | **344,568** | **0.97** | **14,791** | **0.98521** |
+| xs rank<4 ∪ dn rank<1 | 881,617 | 2.49 | 15,355 | 0.98567 |
+| xs rank<8 ∪ dn rank<8 | 3.95M | 11.2 | 15,850 | 0.98607 |
+
+- xs (802 learned native→Latin token maps, train folds only) is far more efficient than dense e5: at rank<2 about 5% of its new pairs are true, against 0.2% for dn rank<4.
+- dn adds only +0.0004 recall on top of xs rank<2. Chosen caps: xs 2, dn 1 (`--cap xs=2,dn=1`).
+- Costs: xs build 4.5 min, 3.3 GB. Measures 5–9 s, ≤4.3 GB. Merge 79 s, 5.0 GB, and the refit reproduces the stored cosines (check passed).
+
+**Matcher effect** (A2 retrained end to end in the isolated `../work_xd`: merged India candidates, India features recomputed at 101 s and 9.8 GB, US features symlinked, `BER_EXTRA=featdn` e5 cosine, `BER_TAG=_xd`). τ and variant chosen on fold 3, reported on fold 0:
+
+| fold 0 | tune F0.5 | eval F0.5 | macro P | macro R | pair R | FP pairs | singleton acc | F0.5 (1 true) | oracle | eval cand pairs |
+|---|---|---|---|---|---|---|---|---|---|---|
+| A2 (E-M1) | 0.98055 | 0.98045 | 0.99334 | 0.95898 | 0.95915 | 4,661 | 0.98009 | 0.92929 | 0.99430 | 9,089,404 |
+| **A2 _xd** (τ 0.68 thr+excl) | **0.98233** | **0.98234** (+0.0019) | 0.99361 | 0.96321 | 0.96330 | 4,564 | 0.98229 | 0.93088 | 0.99631 | 9,176,025 (+1.0%) |
+
+- The matcher keeps ~95% of the oracle gain (+0.0020 oracle, +0.0019 actual). Precision does not drop, and FP pairs fall by 97.
+- dn_cos is not in the top-20 gain, so the gain comes from the candidates, not the feature. Its separate ablation on the stage-2 lab is E-X2.
+- Runtime: A2 _xd evaluate took 2 h 23 min, against ~30 min solo, because of LightGBM OpenMP oversubscription with a concurrent 16-thread fit. Concurrent LightGBM jobs now run with `BER_THREADS≤8 OMP_WAIT_POLICY=PASSIVE`.
+- **Decision: keep** (tune +0.0018 ≥ +0.001 gate). Still pending: a density check at drop 0.19 (solo), the port onto the stage-2-lab pipeline (E-M3), and the test side (`work/chain_x3.sh`).
