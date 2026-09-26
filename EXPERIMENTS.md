@@ -239,3 +239,27 @@ Reading:
 - dn_cos is not in the top-20 gain, so the gain comes from the candidates, not the feature. Its separate ablation on the stage-2 lab is E-X2.
 - Runtime: A2 _xd evaluate took 2 h 23 min, against ~30 min solo, because of LightGBM OpenMP oversubscription with a concurrent 16-thread fit. Concurrent LightGBM jobs now run with `BER_THREADS≤8 OMP_WAIT_POLICY=PASSIVE`.
 - **Decision: keep** (tune +0.0018 ≥ +0.001 gate). Still pending: a density check at drop 0.19 (solo), the port onto the stage-2-lab pipeline (E-M3), and the test side (`work/chain_x3.sh`).
+
+### E-M3b. Density check of stage2_lab variants and the test prediction (`stage2_lab.py density`, `predict`)
+Same 19% S1 drop as density.py (seed 42). Pool-dependent context is recomputed, then stage 1 → stage-2 features → augment/prune → each model. τ is re-chosen on the dense tune fold.
+
+| variant | normal tune | dense tune (τ) | dense eval, dense τ | dense eval, normal τ | loss vs normal eval | dense FP (normal τ) |
+|---|---|---|---|---|---|---|
+| A2 (5d, density.py) | 0.98055 | – (0.73) | 0.97730 | 0.97716 | −0.0033 | – |
+| s2lab_base | 0.98073 | 0.97751 (0.74) | 0.97749 | 0.97728 | −0.0032 | 6,148 |
+| s2lab_new | 0.98182 | 0.97834 (0.71) | 0.97834 | 0.97826 | −0.0032 | 5,770 |
+| s2lab_featx | 0.98549 | 0.98285 (0.78) | 0.98307 | 0.98281 | −0.0025 | 3,898 |
+| **s2lab_all** | 0.98579 | **0.98315** (0.76) | 0.98328 | **0.98323** | **−0.0023** | 3,558 |
+
+**Selected: s2lab_all.** It leads featx on both the normal and the dense tune (+0.0003 each), loses the least under density, and is the most robust at the normal τ. τ stays at 0.69 (tune-selected): under density the dense τ changes the score by only 0.00005. Density peak RSS 3.4 GB (rev filtered to needed targets), 10 min.
+
+**Test prediction** (`output_variants/s2lab_all/`, validator PASS, sha256 c67c4d40…b55ff):
+
+| country | pred/S1 A2 → all | ≥1-match A2 → all | summed p/S1 A2 → all |
+|---|---|---|---|
+| France | 3.447 → 3.404 | 0.9492 → 0.9462 | 3.582 → 3.514 |
+| India | 3.348 → 3.332 | 0.9400 → 0.9400 | 3.438 → 3.393 |
+| US | 3.411 → 3.390 | 0.9425 → 0.9422 | 3.494 → 3.459 |
+| total | 3.39 → 3.36 | 0.942 → 0.942 | |
+
+The direction matches the density simulation (fewer orphan-lookalike FPs). France moves most; it is unseen, so this is the thing to watch on the leaderboard. Status: [MACRO F0.5 VERIFIED fold 0: 0.98550] [density-checked] [test file validated]. Handed to 4f as submission 2.
