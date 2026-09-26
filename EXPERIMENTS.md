@@ -162,3 +162,31 @@ FN p distribution: median 0.32, 10% below 0.05; they are not near-misses at τ.
 **Decision: decoding is saturated** (≤ +0.0002, and the two best rules lower singleton accuracy, which is risky under test density). Not adopted. The remaining gain must come from better scores.
 
 **Cascade finding:** stage-2 rows with p1 < 1e-3 are 88.6% of rows (train folds 0–3) but hold 0.01% of positives. On fold 0, no pair with p1 < 1e-3 reaches p ≥ 0.67 under the full A2. A pruned stage 2 (`src/experiments/stage2_lab.py`) therefore trains in ~2 GB instead of 9.8 GB. Status: [IMPLEMENTED] [SMOKE TESTED on synthetic data]. Real-data run is queued after test blocking (RAM).
+
+## E-D1. A2 under test-like density, plus label-free test diagnostics (parallel track)
+**Setup.** Run with `density.py --approach 2 --drop 0.19`, using the A2 models from E-M1 unchanged. It removes 19% of train S1 at random, so their true targets become owner-less distractors. It then recomputes every pool-dependent context feature and the p1/sibling features, rescores folds 3 and 0, and re-selects τ on fold 3.
+Why 0.19: train has 3.465 true matches and 4.68 targets per S1, which leaves 1.22 orphan targets per S1. If test S1 have the same number of true matches, test's 5.75 targets per S1 give 2.29 orphans per S1. Dropping 19% gives (1.22 + 0.19·3.465)/0.81 = 2.31.
+
+| fold 0 | macro F0.5 | macro P | macro R | FP pairs/S1 | pred pairs/S1 | singleton acc |
+|---|---|---|---|---|---|---|
+| A2 normal density, τ 0.67 | 0.98045 | 0.99334 | 0.95898 | 0.0211 | 3.344 | 0.9801 |
+| A2 test-like density, τ 0.67 | **0.97716** (−0.0033) | 0.98949 | 0.95844 | 0.0340 | 3.356 | 0.9673 |
+| A2 test-like density, τ re-selected (0.73) | 0.97730 (+0.00014) | 0.99089 | 0.95581 | 0.0292 | 3.342 | 0.9701 |
+
+The τ curve under density is flat (0.70: 0.97732, 0.75: 0.97727, 0.67: 0.9772). **Keep τ 0.67.** Density costs precision (FP per S1 +61%, singleton accuracy −1.3 pt), and no threshold recovers it. The fix has to come from scores: features that tell an orphan lookalike from a true copy.
+
+**Label-free test vs eval** (`redecode.py diagnose --approach 2`):
+
+| | cand/S1 | E[m]/S1 (Σp) | pred/S1 @0.7 |
+|---|---|---|---|
+| India eval / test | 41.8 / 50.2 | 3.375 / 3.438 | 3.309 / 3.339 |
+| US eval / test | 40.7 / 48.8 | 3.427 / 3.494 | 3.359 / 3.403 |
+| France test | 47.8 | 3.582 | 3.438 |
+
+Test pred/S1 rises by +0.03 to +0.045 and Σp by +0.065, but the density simulation raises pred/S1 by only +0.012. There are two possible explanations, and nothing label-free can tell them apart:
+- test S1 have slightly more true matches, which is harmless;
+- test orphans are harder lookalikes than simulated ones, which would mean up to about 4× the simulated FP increase.
+
+Expected local-to-LB drop is at least 0.003. An LB score near 0.97 would point to harder orphans.
+
+**Cost:** density.py peaked at **13.5 GB RSS** in 9.5 min (its README says ~8 GB), and it pushed the shared box 4 GB into swap. Run it as a solo job.
