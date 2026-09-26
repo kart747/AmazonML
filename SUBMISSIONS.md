@@ -10,4 +10,5 @@ Never tune repeatedly against the public score; use it to check direction only.
 
 | # | Date/time (IST) | Git commit | Pipeline / decision | Local fold-0 macro F0.5 | sha256 (first 12) | Public LB F0.5 | Notes |
 |---|---|---|---|---|---|---|---|
+| 1 | 2026-09-27 01:46 (built) | 98cdcf3 pipeline (run.py predict --approach 2) | A2 baseline: stage-1 OOF → stage-2, threshold+excl τ=0.67 (tune fold 3) | 0.98045 | 20ade8c0db29 | | Files in `output/sub01_A2_base/`. Validator PASS. Test: 85.38M candidates (49.3/S1), 5.87M matched pairs = 3.39/S1 (eval 3.34), 94.2% of S1 non-empty. |
 | | | | | | | | |

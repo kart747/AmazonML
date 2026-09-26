@@ -1,7 +1,7 @@
 # datasets and generated artifacts (large; reproducible from the pipeline)
 student_resource/
 work/
-output/*.tsv
+output/**/*.tsv
 *.zip
 .venv*/
 __pycache__/
