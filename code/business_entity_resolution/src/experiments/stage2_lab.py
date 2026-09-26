@@ -30,6 +30,7 @@ Usage:
 Outputs: work/s2lab/<split>/*.parquet, reports/s2lab_<variant><tag>.json, models/s2lab_*.txt
 """
 import argparse
+import os
 import json
 import sys
 from pathlib import Path
@@ -48,7 +49,8 @@ from ber.utils import done, log, mark_done, save_json, stage  # noqa: E402
 
 PRUNE = 1e-3
 CONF = 0.5
-OUT = "s2lab"
+OUT = os.environ.get("BER_S2LAB_OUT", "s2lab")    # e.g. s2lab_s1fx
+SRC = os.environ.get("BER_S2LAB_SRC", "feat2")    # stage-2 parts to augment, e.g. feat2_s1fx
 NEW_FEATS = ["cs_n_max", "cs_n_mean", "cs_a_max", "cs_a_mean", "cs_nsp_max", "cs_a_exact", "cs_n_exact", "cs_n",
              "twins", "twin_p1max", "p1_srank", "p1_sn50",
              "n_nsp_ratio", "n_nsp_partial", "a_exact", "a_contain", "t_oov"]
@@ -135,7 +137,7 @@ def hstack_extras(df, split, part_name, extras):
 
 def build(split, extras):
     WD = config.WORK_DIR
-    src_dir, out_dir = WD / "feat2" / split, WD / OUT / split
+    src_dir, out_dir = WD / SRC / split, WD / OUT / split
     out_dir.mkdir(parents=True, exist_ok=True)
     tgx = target_table(split)
     s1 = pl.read_parquet(WD / "prep" / f"s1_{split}.parquet", columns=["rid", "nm", "ad"])
@@ -253,7 +255,7 @@ def density(names, extras, drop_frac=0.19):
     recomputed, stage 1 -> stage-2 features -> augment/prune -> each s2lab model; tau re-chosen
     on the dense tune fold, reported on the dense eval fold (and with the normal tau)."""
     from density import dense_context
-    from ber.approaches import P1_FEATURES, S1_FEATS, add_stage2_features, load_model, parts
+    from ber.approaches import S1_FEATS, add_stage2_features, extra_features, load_model, parts
     from ber.metric import Evaluator
     WD, folds = config.WORK_DIR, [config.TUNE_FOLD, config.EVAL_FOLD]
     s1 = pl.read_parquet(WD / "prep" / "s1_train.parquet", columns=["rid", "fold", "country", "nm", "ad"])
@@ -283,7 +285,7 @@ def density(names, extras, drop_frac=0.19):
     tg = tgx.select("gid", src="_src", nm="_tnm", ad="_tad")
     tg_nm = tg.select("gid", t_nm="nm")
     s1x = s1.select("rid", "nm", "ad")
-    m_a, m_b = load_model("A2_stage1_foldA"), load_model("A2_stage1_foldB")
+    m_a, m_b = load_model(f"A2{config.RUN_TAG}_stage1_foldA"), load_model(f"A2{config.RUN_TAG}_stage1_foldB")
     models = {n: lgb.Booster(model_file=str(WD / "models" / f"{n}.txt")) for n in names}
     metas, ys, ps = [], [], {n: [] for n in names}
     with stage("s2lab_density"):
@@ -295,7 +297,7 @@ def density(names, extras, drop_frac=0.19):
                 continue
             cols = df.columns
             df = dense_context(df, rev_rank, rev_sum, freq_rid, freq_name, tg_nm).select(cols)
-            X = np.ascontiguousarray(df.select(S1_FEATS).to_numpy(), dtype=np.float32)
+            X = np.ascontiguousarray(df.select(S1_FEATS + extra_features()).to_numpy(), dtype=np.float32)
             df = add_stage2_features(df.with_columns(p1=pl.Series(0.5 * (_pred(m_a, X) + _pred(m_b, X)))), tg)
             del X
             df = augment(df, tgx, s1x)
@@ -332,7 +334,7 @@ def density(names, extras, drop_frac=0.19):
         log(f"DENSITY {n}: dense tune {ch[v]['tune_f05']} (tau {ch[v]['tau']}) | eval dense-tau {e['macro_f05']} "
             f"FP {e['false_positive_pairs']} | eval normal-tau {e2['macro_f05']} FP {e2['false_positive_pairs']} "
             f"pairs/S1 {e2['predicted_pairs_per_s1']}")
-    save_json(out, WD / "reports" / "s2lab_density.json")
+    save_json(out, WD / "reports" / f"{OUT}{config.RUN_TAG}_density.json")
 
 
 def main():
