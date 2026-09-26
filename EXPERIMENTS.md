@@ -131,3 +131,34 @@ Train folds {1,2}, tuning fold {3} (early stopping and the choice of decision va
 - A2's top features by gain are p1, rev_margin, p1_qgap and r_rev, all context-dependent. Because the test pool has about 2× more distractors, test predicted pairs per S1 must be checked against the 3.34 seen on eval before submitting A2.
 - Remaining gap to the blocking oracle is 0.0139, mostly recall. S1 with exactly one true match (0.929) are the weakest group.
 - Runtime: A1 evaluate 25.2 min with 5.84 GB peak RSS; A2 evaluate 29.9 min with 9.8 GB peak RSS.
+
+## E-M2. A2 gap decomposition and decoder lab (session 5e; eval fold 0, τ=0.67 thr+excl)
+Where the 0.0139 gap to the blocking oracle comes from. **It is entirely matcher error on pairs already in the candidate set.** Blocking misses are already inside the oracle's 0.9943.
+
+| bucket (fold 0) | pairs | note |
+|---|---|---|
+| true pairs among candidates | 752,132 | |
+| FN (true, p < τ) | 18,222 (2.4%) | 15,959 S1 partially missed, 695 S1 fully missed |
+| … of which target address empty | 8,861 (49%) | often an identical-name empty-address lookalike from another S1 exists: largely undecidable |
+| … of which target is not its reverse-best S1 | 8,759 (48%) | name shared by several S1 |
+| … of which address matches (a_tset ≥ 0.9, non-empty) | 6,720 | typos plus house-number noise inside TRUE pairs (620/619, 454/54, 103/91), phonetic transliteration ("hoyait gyalaksi eksports praibhet" = white galaxy exports private), coined DBA names at the same address ("caloflux", "evobrix") |
+| … coined single-token OOV target names | 1,858 FN / 264 FP | including glued names ("earnosethroat") |
+| FP (false, p ≥ τ) | 4,721 | **78% of FP targets belong to no S1**: orphan lookalikes, same address plus a one-character name edit (meentech→meentex). Test has ~23% more targets per S1, so more of these |
+
+FN p distribution: median 0.32, 10% below 0.05; they are not near-misses at τ.
+
+**Decoder lab** (`decoder_lab.py --approach 2`, parameters chosen on fold 3, reported on fold 0, paired bootstrap SE):
+
+| decoder | params | eval F0.5 | Δ vs thr+excl (SE) | pair P | pair R | singleton acc |
+|---|---|---|---|---|---|---|
+| threshold+excl (A2 default) | τ 0.67 | 0.98045 | 0 | 0.9937 | 0.9591 | 0.9801 |
+| threshold | 0.69 | 0.98036 | −0.00009 (0.00004) | 0.9939 | 0.9584 | 0.9805 |
+| relative+excl | 0.5, α 0.7 | 0.98063 | +0.00018 (0.00007) | 0.9940 | 0.9583 | 0.9714 |
+| per_source+excl | 0.65/0.65 | 0.98040 | −0.00004 | 0.9933 | 0.9599 | 0.9789 |
+| caps(S2≤5,S3≤6) | 0.67 | 0.98045 | +0.00001 | 0.9937 | 0.9591 | 0.9801 |
+| hn_adjust | 0.68, b 0.05 | 0.98035 | −0.00009 | 0.9936 | 0.9591 | 0.9799 |
+| expected_f05 calibrated+excl | λ 0 | 0.98064 | +0.00019 (0.00008) | 0.9944 | 0.9569 | 0.9689 |
+
+**Decision: decoding is saturated** (≤ +0.0002, and the two best rules lower singleton accuracy, which is risky under test density). Not adopted. The remaining gain must come from better scores.
+
+**Cascade finding:** stage-2 rows with p1 < 1e-3 are 88.6% of rows (train folds 0–3) but hold 0.01% of positives. On fold 0, no pair with p1 < 1e-3 reaches p ≥ 0.67 under the full A2. A pruned stage 2 (`src/experiments/stage2_lab.py`) therefore trains in ~2 GB instead of 9.8 GB. Status: [IMPLEMENTED] [SMOKE TESTED on synthetic data]. Real-data run is queued after test blocking (RAM).
