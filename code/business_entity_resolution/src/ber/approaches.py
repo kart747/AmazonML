@@ -36,6 +36,7 @@ P1_FEATURES = ["p1", "p1_qrank", "p1_qgap", "p1_qsum", "p1_qn50", "p1_qmax_other
                "sib_p1", "sib_n_tset", "sib_a_tset", "sib_same_src", "sib2_n_tset", "sib2_a_tset"]
 S1_FEATS = PAIR_FEATURES + CONTEXT_FEATURES
 S2_FEATS = S1_FEATS + P1_FEATURES
+TAG = config.RUN_TAG
 META = ["rid", "gid", "fold"]
 
 
@@ -44,11 +45,37 @@ def parts(split, sub="feat"):
     return sorted((config.WORK_DIR / sub / split).glob("*.parquet"))
 
 
+def extra_features():
+    """Names of the optional extra feature columns (config.EXTRA_SETS), in load order."""
+    names = []
+    for s in config.EXTRA_SETS:
+        f = next((config.WORK_DIR / s / "train").glob("*.parquet"))
+        names += [c for c in pl.read_parquet_schema(f) if c not in ("rid", "gid", "fold")]
+    return names
+
+
+def _with_extras(df: pl.DataFrame, split, folds=None, part_name=None) -> pl.DataFrame:
+    """Append row-aligned extra feature sets; keys are verified, never assumed."""
+    for s in config.EXTRA_SETS:
+        src = config.WORK_DIR / s / split / (part_name or "*.parquet")
+        lf = pl.scan_parquet(src)
+        if folds is not None:
+            lf = lf.filter(pl.col("fold").is_in(list(folds)))
+        x = lf.collect()
+        if not (x.get_column("rid").equals(df.get_column("rid")) and x.get_column("gid").equals(df.get_column("gid"))):
+            raise ValueError(f"extra feature set {s} is not row-aligned with the base features")
+        df = df.hstack(x.drop("rid", "gid", "fold"))
+    return df
+
+
 def load_xy(split, folds, feats, sub="feat"):
     """(meta, X, y) for the requested folds; X is a C-contiguous float32 array."""
+    base = [f for f in feats if f not in extra_features()] if sub == "feat" else feats
     df = (pl.scan_parquet(config.WORK_DIR / sub / split / "*.parquet")
             .filter(pl.col("fold").is_in(list(folds)))
-            .select(META + ["y"] + feats).collect())
+            .select(META + ["y"] + base).collect())
+    if sub == "feat":
+        df = _with_extras(df, split, folds)
     X = np.ascontiguousarray(df.select(feats).to_numpy(), dtype=np.float32)
     return df.select(META), X, df.get_column("y").to_numpy()
 
@@ -128,15 +155,16 @@ def add_stage2_features(df: pl.DataFrame, tg: pl.DataFrame) -> pl.DataFrame:
 def a2_stage1_models():
     """Two cross-fitted stage-1 models (fold A -> scores fold B and vice versa)."""
     fa, fb = config.TRAIN_FOLDS
-    _, Xtu, ytu = load_xy("train", [config.TUNE_FOLD], S1_FEATS)
+    feats = S1_FEATS + extra_features()
+    _, Xtu, ytu = load_xy("train", [config.TUNE_FOLD], feats)
     ms = {}
     for tag, f in (("A", fa), ("B", fb)):
-        name = f"A2_stage1_fold{tag}"
+        name = f"A2{TAG}_stage1_fold{tag}"
         if (MODEL_DIR / f"{name}.txt").exists():
             ms[tag] = load_model(name)
             continue
-        _, X, y = load_xy("train", [f], S1_FEATS)
-        ms[tag] = train_lgb(X, y, Xtu, ytu, S1_FEATS, name)
+        _, X, y = load_xy("train", [f], feats)
+        ms[tag] = train_lgb(X, y, Xtu, ytu, feats, name)
         del X, y
     return ms["A"], ms["B"]
 
@@ -144,15 +172,16 @@ def a2_stage1_models():
 def build_stage2_parts(split, m_a, m_b):
     """Write work/feat2/<split>/*.parquet = stage-1 features + P1_FEATURES (resumable)."""
     fa, fb = config.TRAIN_FOLDS
-    out = config.WORK_DIR / "feat2" / split
+    out = config.WORK_DIR / f"feat2{TAG}" / split
+    feats = S1_FEATS + extra_features()
     out.mkdir(parents=True, exist_ok=True)
     tg = pl.read_parquet(config.WORK_DIR / "prep" / f"tg_{split}.parquet", columns=["gid", "src", "nm", "ad"])
     for p in parts(split):
         dst = out / p.name
         if done(dst):
             continue
-        df = pl.read_parquet(p)
-        X = np.ascontiguousarray(df.select(S1_FEATS).to_numpy(), dtype=np.float32)
+        df = _with_extras(pl.read_parquet(p), split, part_name=p.name)
+        X = np.ascontiguousarray(df.select(feats).to_numpy(), dtype=np.float32)
         fold = df.get_column("fold").to_numpy()
         p1 = np.empty(len(fold), np.float32)
         # out-of-fold for the two training folds; averaged models everywhere else
@@ -215,9 +244,9 @@ def decide(p, gid, variant, tau):
 def _score_fold(approach, fold, models):
     """(meta, y, p) for one fold, streaming over parts."""
     if approach == 1:
-        meta, X, y = load_xy("train", [fold], PAIR_FEATURES)
+        meta, X, y = load_xy("train", [fold], PAIR_FEATURES + extra_features())
         return meta, y, _pred(models, X)
-    meta, X, y = load_xy("train", [fold], S2_FEATS, sub="feat2")
+    meta, X, y = load_xy("train", [fold], S2_FEATS + extra_features(), sub=f"feat2{TAG}")
     return meta, y, _pred(models, X)
 
 
@@ -225,21 +254,21 @@ def _score_fold(approach, fold, models):
 def evaluate(approach: int):
     """Fit on TRAIN_FOLDS, choose the decision on TUNE_FOLD, report on EVAL_FOLD."""
     tf, uf, ef = config.TRAIN_FOLDS, config.TUNE_FOLD, config.EVAL_FOLD
-    with stage(f"evaluate_A{approach}"):
+    with stage(f"evaluate_A{approach}{TAG}"):
         if approach == 1:
-            feats = PAIR_FEATURES
+            feats = PAIR_FEATURES + extra_features()
             _, Xtu, ytu = load_xy("train", [uf], feats)
             _, Xtr, ytr = load_xy("train", tf, feats)
-            m = train_lgb(Xtr, ytr, Xtu, ytu, feats, "A1")
+            m = train_lgb(Xtr, ytr, Xtu, ytu, feats, f"A1{TAG}")
             del Xtr, ytr, Xtu, ytu
         else:
-            feats = S2_FEATS
+            feats = S2_FEATS + extra_features()
             m_a, m_b = a2_stage1_models()
             with stage("A2_stage2_features_train"):
                 build_stage2_parts("train", m_a, m_b)
-            _, Xtu, ytu = load_xy("train", [uf], feats, sub="feat2")
-            _, Xtr, ytr = load_xy("train", tf, feats, sub="feat2")
-            m = train_lgb(Xtr, ytr, Xtu, ytu, feats, "A2_stage2")
+            _, Xtu, ytu = load_xy("train", [uf], feats, sub=f"feat2{TAG}")
+            _, Xtr, ytr = load_xy("train", tf, feats, sub=f"feat2{TAG}")
+            m = train_lgb(Xtr, ytr, Xtu, ytu, feats, f"A2{TAG}_stage2")
             del Xtr, ytr, Xtu, ytu
         importance = dict(zip(feats, m.feature_importance("gain").round().astype(int).tolist()))
 
@@ -264,34 +293,40 @@ def evaluate(approach: int):
             "eval_candidate_pairs": int(len(y_ev)),
             "feature_gain_top20": dict(sorted(importance.items(), key=lambda kv: -kv[1])[:20]),
         }
-        pl.DataFrame({"rid": meta_ev.get_column("rid"), "gid": meta_ev.get_column("gid"),
-                      "y": y_ev, "p": p_ev, "keep": keep}).write_parquet(
-            config.WORK_DIR / "reports" / f"eval_A{approach}_pairs.parquet")
-    save_json(res, config.WORK_DIR / "reports" / f"eval_A{approach}.json")
-    log(f"A{approach} eval: {json.dumps(res['eval'])}")
+        # scored pairs of the tune and eval folds, for the decoder lab (experiments/decoder_lab.py)
+        pl.concat([
+            pl.DataFrame({"rid": meta_tu.get_column("rid"), "gid": meta_tu.get_column("gid"),
+                          "fold": pl.Series([uf] * len(y_tu), dtype=pl.Int8), "y": y_tu, "p": p_tu}),
+            pl.DataFrame({"rid": meta_ev.get_column("rid"), "gid": meta_ev.get_column("gid"),
+                          "fold": pl.Series([ef] * len(y_ev), dtype=pl.Int8), "y": y_ev, "p": p_ev}),
+        ]).write_parquet(config.WORK_DIR / "reports" / f"scores_A{approach}{TAG}.parquet")
+    save_json(res, config.WORK_DIR / "reports" / f"eval_A{approach}{TAG}.json")
+    log(f"A{approach}{TAG} eval: {json.dumps(res['eval'])}")
     return res
 
 
 # ---------------------------------------------------------------- test prediction
 def predict(approach: int):
-    rep = json.load(open(config.WORK_DIR / "reports" / f"eval_A{approach}.json"))
+    rep = json.load(open(config.WORK_DIR / "reports" / f"eval_A{approach}{TAG}.json"))
     variant, tau = rep["decision_selected_on_tune_fold"]["variant"], rep["decision_selected_on_tune_fold"]["tau"]
-    with stage(f"predict_test_A{approach}"):
+    with stage(f"predict_test_A{approach}{TAG}"):
         if approach == 1:
-            m, sub, feats = load_model("A1"), "feat", PAIR_FEATURES
+            m, sub, feats = load_model(f"A1{TAG}"), "feat", PAIR_FEATURES + extra_features()
         else:
-            m_a, m_b = load_model("A2_stage1_foldA"), load_model("A2_stage1_foldB")
+            m_a, m_b = load_model(f"A2{TAG}_stage1_foldA"), load_model(f"A2{TAG}_stage1_foldB")
             build_stage2_parts("test", m_a, m_b)
-            m, sub, feats = load_model("A2_stage2"), "feat2", S2_FEATS
+            m, sub, feats = load_model(f"A2{TAG}_stage2"), f"feat2{TAG}", S2_FEATS + extra_features()
         metas, ps = [], []
         for p in parts("test", sub):
-            df = pl.read_parquet(p, columns=["rid", "gid"] + feats)
+            df = pl.read_parquet(p)
+            if sub == "feat":
+                df = _with_extras(df, "test", part_name=p.name)
             ps.append(_pred(m, np.ascontiguousarray(df.select(feats).to_numpy(), dtype=np.float32)))
             metas.append(df.select("rid", "gid"))
         meta, p = pl.concat(metas), np.concatenate(ps)
         keep = decide(p, meta.get_column("gid").to_numpy(), variant, tau)
         meta.with_columns(p=pl.Series(p), keep=pl.Series(keep)).write_parquet(
-            config.WORK_DIR / "reports" / f"test_A{approach}_pairs.parquet")
+            config.WORK_DIR / "reports" / f"test_A{approach}{TAG}_pairs.parquet")
         write_submission(meta, keep)
     return run_validator()
 

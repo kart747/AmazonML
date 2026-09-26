@@ -47,8 +47,11 @@ class Evaluator:
         return tp, n_pred
 
     def macro_f05(self, keep):
+        return float(self.per_entity(keep).mean())
+
+    def per_entity(self, keep):
         tp, n_pred = self.counts(keep)
-        return float(f05_per_entity(tp, n_pred, self.n_true).mean())
+        return f05_per_entity(tp, n_pred, self.n_true)
 
     def report(self, keep):
         tp, n_pred = self.counts(keep)

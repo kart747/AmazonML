@@ -55,6 +55,13 @@ LGB_EARLY_STOP = 50
 
 THRESHOLD_GRID = [round(0.30 + 0.01 * i, 2) for i in range(66)]  # 0.30 .. 0.95
 
+# ---- experiment variants (so teammates can run variants without overwriting each other) ----
+# BER_TAG:   suffix for model/report/stage-2 artifact names, e.g. "_v2feats"
+# BER_EXTRA: comma-separated extra feature sets (work/<name>/<split>/*.parquet, row-aligned
+#            with work/feat), e.g. "featx" produced by `python src/experiments/features_v2.py`
+RUN_TAG = os.environ.get("BER_TAG", "")
+EXTRA_SETS = [s for s in os.environ.get("BER_EXTRA", "").split(",") if s]
+
 
 def ensure_dirs():
     for d in (WORK_DIR, OUT_DIR):
