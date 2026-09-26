@@ -88,11 +88,16 @@ def cached_encode(path, texts, tok_model, device):
     return emb
 
 
-def search(Q, S, k, device, q_batch=2048, s_chunk=131072):
-    """Exact top-k inner product of each row of Q among rows of S (both normalized)."""
+def search(Q, S, k, device, item_mask=None, q_batch=2048, s_chunk=131072):
+    """Exact top-k inner product of each row of Q among rows of S (both normalized).
+
+    Returns compact arrays (query row, item row, score, rank), filtered per batch to items
+    where item_mask is True (e.g. query-fold S1), so peak RAM stays proportional to the
+    pairs kept rather than to len(Q) * k.
+    """
     import torch
     k = min(k, S.shape[0])
-    qs, its, scs = [], [], []
+    qs, its, scs, rks = [], [], [], []
     S_chunks = [(s0, torch.from_numpy(np.ascontiguousarray(S[s0:s0 + s_chunk])).to(device))
                 for s0 in range(0, S.shape[0], s_chunk)]
     for q0 in range(0, Q.shape[0], q_batch):
@@ -107,13 +112,14 @@ def search(Q, S, k, device, q_batch=2048, s_chunk=131072):
                 v2, j = torch.topk(torch.cat([best_v, v], 1), k, dim=1)
                 best_i = torch.gather(torch.cat([best_i, i], 1), 1, j)
                 best_v = v2
-        n = best_v.shape[0]
-        qs.append(np.repeat(np.arange(q0, q0 + n), best_v.shape[1]))
-        its.append(best_i.cpu().numpy().ravel())
-        scs.append(best_v.float().cpu().numpy().ravel())
-    q, it, sc = np.concatenate(qs), np.concatenate(its), np.concatenate(scs)
-    rank = np.tile(np.arange(k), len(q) // k) if len(q) % k == 0 else None
-    return q, it, sc, rank
+        n, kk = best_v.shape
+        it = best_i.cpu().numpy().astype(np.int32).ravel()
+        sc = best_v.float().cpu().numpy().ravel()
+        qq = np.repeat(np.arange(q0, q0 + n, dtype=np.int32), kk)
+        rk = np.tile(np.arange(kk, dtype=np.int16), n)
+        m = item_mask[it] if item_mask is not None else slice(None)
+        qs.append(qq[m]); its.append(it[m]); scs.append(sc[m]); rks.append(rk[m])
+    return np.concatenate(qs), np.concatenate(its), np.concatenate(scs), np.concatenate(rks)
 
 
 def build(split, k, scope):
@@ -150,17 +156,14 @@ def build(split, k, scope):
             T = cached_encode(ddir / f"tg_{scope}_{country}.npy", text(tgc), tok_model, device)
             np.save(ddir / f"s1_{country}_ids.npy", s1c.get_column("rid").to_numpy())
             np.save(ddir / f"tg_{scope}_{country}_ids.npy", tgc.get_column("gid").to_numpy())
-            tq, sq, sc, rk = search(T, S, k, device)
-            if rk is None:
-                rk = (pl.DataFrame({"q": tq, "s": sc}).with_columns(
-                    r=pl.col("s").rank("ordinal", descending=True).over("q") - 1).get_column("r").to_numpy())
             qmask = (s1c.get_column("fold").is_in(config.QUERY_FOLDS).to_numpy() if split == "train"
                      else np.ones(s1c.height, bool))
-            keep = qmask[sq]
+            # ranks are computed over ALL S1 (realistic competition), then non-query S1 are dropped
+            tq, sq, sc, rk = search(T, S, k, device, item_mask=qmask)
             res = pl.DataFrame({
-                "rid": s1c.get_column("rid").to_numpy()[sq[keep]].astype(np.int32),
-                "gid": tgc.get_column("gid").to_numpy()[tq[keep]].astype(np.int32),
-                "r_dn": rk[keep].astype(np.int16), "s_dn": sc[keep].astype(np.float32)})
+                "rid": s1c.get_column("rid").to_numpy()[sq].astype(np.int32),
+                "gid": tgc.get_column("gid").to_numpy()[tq].astype(np.int32),
+                "r_dn": rk, "s_dn": sc.astype(np.float32)})
             res.write_parquet(out)
             mark_done(out)
             log(f"dn {split}/{country}: {res.height:,} pairs")
