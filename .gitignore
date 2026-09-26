@@ -3,7 +3,7 @@ student_resource/
 work/
 output/*.tsv
 *.zip
-.venv/
+.venv*/
 __pycache__/
 *.pyc
 .DS_Store
