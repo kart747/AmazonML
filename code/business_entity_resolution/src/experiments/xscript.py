@@ -121,16 +121,31 @@ def build(split):
             log(f"xs {split}/{country}: {res.height:,} pairs")
 
 
-def measure(countries=None):
-    """Recall gain of base ∪ xs over base, on train query folds (labels for measurement only)."""
+def _view_pairs(bdir, c, views):
+    """Union of the supplementary views' pairs for one country: rid, gid, r_<view>..."""
+    out = None
+    for v in views:
+        f = bdir / f"{v}_{c}.parquet"
+        if not f.exists():
+            continue
+        x = pl.read_parquet(f).select("rid", "gid", pl.col(f"r_{v}"))
+        out = x if out is None else out.join(x, on=["rid", "gid"], how="full", coalesce=True)
+    return out
+
+
+def _countries(bdir, views):
+    return sorted({f.stem.split("_", 1)[1] for v in views for f in bdir.glob(f"{v}_*.parquet")})
+
+
+def measure(countries=None, views=("xs",)):
+    """Recall gain of base ∪ views over base, on train query folds (labels for measurement only)."""
     W = config.WORK_DIR
     bdir = W / "block" / "train"
     s1 = pl.read_parquet(W / "prep" / "s1_train.parquet", columns=["rid", "fold", "country"]) \
         .filter(pl.col("fold").is_in(config.QUERY_FOLDS))
     gt = pl.read_parquet(W / "prep" / "gt_train.parquet").join(s1, on="rid")
     rep = {}
-    for xf in sorted(bdir.glob("xs_*.parquet")):
-        c = xf.stem[3:]
+    for c in _countries(bdir, views):
         if countries and c not in countries:
             continue
         cf = bdir / f"cand_{c}.parquet"
@@ -138,55 +153,68 @@ def measure(countries=None):
             log(f"measure {c}: base candidates missing ({cf}), skipped")
             continue
         base = pl.read_parquet(cf, columns=["rid", "gid"]).with_columns(in_base=pl.lit(True))
-        xs = pl.read_parquet(xf).with_columns(in_xs=pl.lit(True))
+        vp = _view_pairs(bdir, c, views)
+        rcols = [x for x in vp.columns if x.startswith("r_")]
         g = gt.filter(pl.col("country") == c).select("rid", "gid")
-        h = (g.join(base, on=["rid", "gid"], how="left").join(xs, on=["rid", "gid"], how="left")
-               .with_columns(pl.col("in_base").fill_null(False), pl.col("in_xs").fill_null(False)))
-        new_pairs = xs.join(base, on=["rid", "gid"], how="anti").height
+        h = (g.join(base, on=["rid", "gid"], how="left").join(vp, on=["rid", "gid"], how="left")
+               .with_columns(pl.col("in_base").fill_null(False),
+                             in_view=pl.any_horizontal([pl.col(r).is_not_null() for r in rcols])))
+        ib, iv = h.get_column("in_base"), h.get_column("in_view")
+        new_pairs = vp.join(base, on=["rid", "gid"], how="anti").height
         n_q = s1.filter(pl.col("country") == c).height
-        by_k = {k: round(float((h.get_column("in_base") | (h.get_column("in_xs") & (h.get_column("r_xs") < k)).fill_null(False)).mean()), 5)
-                for k in (1, 2, 4, 8)}
+        per_view = {}
+        for r in rcols:
+            per_view[r[2:]] = {k: round(float((ib | (h.get_column(r) < k).fill_null(False)).mean()), 5)
+                               for k in (1, 2, 4, 8, 15, 30) if k <= int(vp.get_column(r).max() or 0) + 1}
         rep[c] = {
             "true_pairs": h.height,
-            "base_recall": round(float(h.get_column("in_base").mean()), 5),
-            "union_recall_by_k": by_k,
-            "recovered_pairs": int((h.get_column("in_xs") & ~h.get_column("in_base")).sum()),
-            "base_misses": int((~h.get_column("in_base")).sum()),
-            "xs_pairs": xs.height, "xs_new_pairs": new_pairs,
+            "base_recall": round(float(ib.mean()), 5),
+            "union_recall": round(float((ib | iv).mean()), 5),
+            "union_recall_by_k_per_view": per_view,
+            "recovered_pairs": int((iv & ~ib).sum()),
+            "base_misses": int((~ib).sum()),
+            "view_pairs": vp.height, "new_pairs": new_pairs,
             "new_candidates_per_query_s1": round(new_pairs / max(1, n_q), 2),
         }
-        log(f"xs measure {c}: {rep[c]}")
-    save_json(rep, W / "reports" / "xscript_recall.json")
+        log(f"measure [{','.join(views)}] {c}: {rep[c]}")
+    name = "xscript_recall.json" if list(views) == ["xs"] else f"supp_recall_{'_'.join(views)}.json"
+    save_json(rep, W / "reports" / name)
     return rep
 
 
-def merge(split, dst: Path):
-    """Isolated work dir with cand = base ∪ xs (new pairs get exact base-view cosines)."""
+def merge(split, dst: Path, views=("xs",), caps=None):
+    """Isolated work dir with cand = base ∪ views (new pairs get exact base-view cosines)."""
     W = config.WORK_DIR
     src_b, dst_b = W / "block" / split, dst / "block" / split
     dst_b.mkdir(parents=True, exist_ok=True)
     (dst / "reports").mkdir(exist_ok=True)  # run.py evaluate writes there without creating it
-    if not (dst / "prep").exists():
-        os.symlink((W / "prep").resolve(), dst / "prep")
-    # rev/cand files of countries without an xs file are linked unchanged
+    for d in ("prep", "dense"):  # dense/ holds e5 embeddings (dense_view.py) when present
+        if (W / d).exists() and not (dst / d).exists():
+            os.symlink((W / d).resolve(), dst / d)
+    merge_c = set(_countries(src_b, views))
+    # rev files, and cand files of countries without a supplementary view, are linked unchanged
     for f in sorted(src_b.glob("rev_*.parquet")) + sorted(src_b.glob("cand_*.parquet")):
         c = f.stem.split("_", 1)[1]
-        if f.name.startswith("cand_") and (src_b / f"xs_{c}.parquet").exists():
+        if f.name.startswith("cand_") and c in merge_c:
             continue
         for x in (f, Path(str(f) + ".done")):
             if x.exists() and not (dst_b / x.name).exists():
                 os.symlink(x.resolve(), dst_b / x.name)
     s1 = pl.read_parquet(W / "prep" / f"s1_{split}.parquet", columns=["rid", "country", "fold", "nm", "ad"])
     tg = pl.read_parquet(W / "prep" / f"tg_{split}.parquet", columns=["gid", "country", "nm", "ad"])
-    for xf in sorted(src_b.glob("xs_*.parquet")):
-        c = xf.stem[3:]
+    for c in sorted(merge_c):
         out = dst_b / f"cand_{c}.parquet"
         if done(out):
             continue
-        with stage(f"xs_merge_{split}_{c}"):
+        with stage(f"supp_merge_{split}_{c}"):
             base = pl.read_parquet(src_b / f"cand_{c}.parquet")
-            xs = pl.read_parquet(xf)
-            new = xs.join(base.select("rid", "gid"), on=["rid", "gid"], how="anti")
+            vp = _view_pairs(src_b, c, views)
+            rcols = [x for x in vp.columns if x.startswith("r_")]
+            for v, cap in (caps or {}).items():  # keep a view's pairs only up to rank < cap
+                if f"r_{v}" in rcols:
+                    vp = vp.with_columns(pl.when(pl.col(f"r_{v}") < cap).then(pl.col(f"r_{v}")).alias(f"r_{v}"))
+            vp = vp.filter(pl.any_horizontal([pl.col(r).is_not_null() for r in rcols]))
+            new = vp.join(base.select("rid", "gid"), on=["rid", "gid"], how="anti")
             # refit the base blocking vectorizers exactly (same record order and sample seed as
             # blocking.block_country) so cosines of new pairs are on the same scale
             s1c, tgc = s1.filter(pl.col("country") == c), tg.filter(pl.col("country") == c)
@@ -216,12 +244,11 @@ def merge(split, dst: Path):
             if err > 1e-4:
                 raise RuntimeError(f"refit vectorizers do not reproduce base cosines (max err {err:.2e})")
             new = new.with_columns(cos_name=cos(NS, NT, sl, tl), cos_addr=cos(AS, AT, sl, tl))
-            merged = pl.concat([base.join(xs.select("rid", "gid", "r_xs"), on=["rid", "gid"], how="left"),
-                                new.drop("s_xs")], how="diagonal_relaxed")
-            merged = merged.select(base.columns + ["r_xs"])
+            merged = pl.concat([base.join(vp, on=["rid", "gid"], how="left"), new], how="diagonal_relaxed")
+            merged = merged.select(base.columns + rcols)
             merged.write_parquet(out)
             mark_done(out)
-            log(f"xs merge {split}/{c}: base {base.height:,} + new {new.height:,} = {merged.height:,}")
+            log(f"merge [{','.join(views)}] {split}/{c}: base {base.height:,} + new {new.height:,} = {merged.height:,}")
 
 
 def main():
@@ -230,15 +257,19 @@ def main():
     ap.add_argument("--split", choices=["train", "test"], default="train")
     ap.add_argument("--country", action="append", default=None)
     ap.add_argument("--dst", default=None)
+    ap.add_argument("--views", default="xs", help="comma-separated supplementary views, e.g. xs,dn")
+    ap.add_argument("--cap", default="", help="merge only: per-view rank cap, e.g. dn=8,xs=4")
     a = ap.parse_args()
+    views = [v for v in a.views.split(",") if v]
+    caps = {k: int(v) for k, v in (x.split("=") for x in a.cap.split(",") if x)}
     if a.cmd == "build":
         build(a.split)
     elif a.cmd == "measure":
-        measure(a.country)
+        measure(a.country, views)
     else:
         if not a.dst:
             sys.exit("--dst is required for merge")
-        merge(a.split, Path(a.dst).resolve())
+        merge(a.split, Path(a.dst).resolve(), views, caps)
 
 
 if __name__ == "__main__":

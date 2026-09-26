@@ -49,7 +49,7 @@ def test_parallel_modules():
         print("xscript measure:", json.dumps(rep))
         assert "India" in rep and "US" not in rep, rep           # only non-Latin-script targets
         r = rep["India"]
-        assert r["union_recall_by_k"]["8"] >= r["base_recall"], r
+        assert r["union_recall"] >= r["base_recall"] and "xs" in r["union_recall_by_k_per_view"], r
         dst = tmp / "work_xs"
         for split in ("train", "test"):
             sh([xs, "merge", "--split", split, "--dst", dst], env)
@@ -61,6 +61,30 @@ def test_parallel_modules():
         after = sorted(p.name for p in (tmp / "work" / "block" / "train").iterdir())
         assert set(base_files) <= set(after) and all(n.startswith("xs_") for n in set(after) - set(base_files)), \
             "xscript must only add xs_* files to the base block dir"
+
+        # ---- dense view (optional: needs BER_DENSE_PY = a python with torch + transformers)
+        dpy = os.environ.get("BER_DENSE_PY")
+        if dpy and Path(dpy).exists():
+            r = subprocess.run([dpy, str(SRC / "experiments" / "dense_view.py"), "build", "--split", "train"],
+                               env=env, capture_output=True, text=True)
+            assert r.returncode == 0, r.stderr[-3000:]
+            sh([xs, "measure", "--views", "xs,dn"], env)
+            rep = json.load(open(tmp / "work" / "reports" / "supp_recall_xs_dn.json"))
+            print("xs+dn measure:", json.dumps(rep["India"]))
+            assert rep["India"]["union_recall"] >= rep["India"]["base_recall"]
+            dst2 = tmp / "work_xd"
+            sh([xs, "merge", "--split", "train", "--dst", dst2, "--views", "xs,dn", "--cap", "dn=8"], env)
+            env_xd = dict(env, BER_WORK_DIR=str(dst2))
+            sh([SRC / "run.py", "features", "--split", "train"], env_xd)
+            r = subprocess.run([dpy, str(SRC / "experiments" / "dense_view.py"), "features", "--split", "train"],
+                               env=env_xd, capture_output=True, text=True)
+            assert r.returncode == 0, r.stderr[-3000:]
+            sh([SRC / "run.py", "evaluate", "--approach", "1"], dict(env_xd, BER_EXTRA="featdn", BER_TAG="_dn"))
+            ev = json.load(open(dst2 / "reports" / "eval_A1_dn.json"))
+            assert "dn_cos" in ev["feature_gain_top20"] or ev["n_features"] > 29, ev
+            print("A1 xs+dn@8 + dn_cos:", ev["eval"]["macro_f05"])
+        else:
+            print("dense view skipped (set BER_DENSE_PY to a python with torch + transformers)")
 
         # ---- redecode: diagnostics + a variant submission
         print(sh([SRC / "experiments" / "redecode.py", "diagnose", "--approach", "2"], env)[-1500:])

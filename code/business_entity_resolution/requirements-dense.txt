@@ -1,0 +1,8 @@
+# Optional dense-retrieval stage (src/experiments/dense_view.py). Install in a SEPARATE venv so the
+# CPU pipeline's environment stays unchanged, e.g.
+#   python -m venv .venv-dense && .venv-dense/bin/pip install -r requirements.txt -r requirements-dense.txt \
+#       --extra-index-url https://download.pytorch.org/whl/cu121
+# (or create it with --system-site-packages to reuse an existing CUDA torch).
+# Model: intfloat/multilingual-e5-small (MIT licence, 118M parameters), downloaded once from Hugging Face.
+torch==2.5.1
+transformers==5.17.0
