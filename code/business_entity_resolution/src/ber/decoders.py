@@ -38,6 +38,31 @@ def relative(s1, p, n, tau, alpha):
     return (p >= tau) & (p >= alpha * group_max(s1, p, n))
 
 
+def source_caps(s1, src, p, keep, caps=((2, 5), (3, 6))):
+    """Keep at most `cap` pairs per (S1, source) among `keep`, by descending p.
+
+    Ground truth never has more than 5 S2 or 6 S3 matches per S1 (0 violations over
+    7.64M train pairs), so any extra prediction is certainly a false positive.
+    """
+    out = keep.copy()
+    idx = np.flatnonzero(keep)
+    order = idx[np.lexsort((-p[idx], src[idx], s1[idx]))]
+    key = s1[order].astype(np.int64) * 8 + src[order]
+    starts = np.r_[0, np.flatnonzero(np.diff(key)) + 1]
+    rank = np.arange(len(order)) - np.repeat(starts, np.diff(np.r_[starts, len(order)]))
+    cap = np.zeros(len(order), dtype=np.int64)
+    for s, c in caps:
+        cap[src[order] == s] = c
+    out[order[rank >= cap]] = False
+    return out
+
+
+def hn_adjust(p, first_eq, first_logdiff, b):
+    """House-number guard: +b if first numbers match, -b for a small substitution (1..5)."""
+    small = (first_logdiff > 0) & (first_logdiff <= np.log1p(5)) & (first_eq == 0)
+    return p + b * (first_eq == 1) - b * small
+
+
 def expected_f05(s1, p, n, lam=0.0, beta2=0.25):
     """Per-S1 prefix decoding maximizing approximate expected F0.5 (vectorized)."""
     order = np.lexsort((-p, s1))

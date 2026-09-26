@@ -22,7 +22,7 @@ import polars as pl
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from ber import config  # noqa: E402
 from ber.approaches import make_evaluator  # noqa: E402
-from ber.decoders import Calibrator, exclusive, expected_f05, relative  # noqa: E402
+from ber.decoders import Calibrator, exclusive, expected_f05, hn_adjust, relative, source_caps  # noqa: E402
 from ber.utils import log, save_json  # noqa: E402
 
 
@@ -43,6 +43,10 @@ def main():
     sc = pl.read_parquet(config.WORK_DIR / "reports" / f"scores_{name}.parquet")
     src = pl.read_parquet(config.WORK_DIR / "prep" / "tg_train.parquet", columns=["gid", "src"])
     sc = sc.join(src, on="gid", how="left", maintain_order="left")
+    hn = (pl.scan_parquet(config.WORK_DIR / "feat" / "train" / "*.parquet")
+            .filter(pl.col("fold").is_in([config.TUNE_FOLD, config.EVAL_FOLD]))
+            .select("rid", "gid", "num_first_eq", "num_first_logdiff").collect())
+    sc = sc.join(hn, on=["rid", "gid"], how="left", maintain_order="left")
 
     data = {}
     for role, fold in (("tune", config.TUNE_FOLD), ("eval", config.EVAL_FOLD)):
@@ -50,7 +54,9 @@ def main():
         ev = make_evaluator(d.select("rid"), d.get_column("y").to_numpy(), fold)
         data[role] = dict(ev=ev, p=d.get_column("p").to_numpy().astype(np.float64),
                           gid=d.get_column("gid").to_numpy(), src=d.get_column("src").to_numpy(),
-                          y=d.get_column("y").to_numpy())
+                          y=d.get_column("y").to_numpy(),
+                          heq=d.get_column("num_first_eq").fill_null(-1).to_numpy(),
+                          hld=d.get_column("num_first_logdiff").fill_null(-1).to_numpy())
     cal = Calibrator().fit(data["tune"]["p"], data["tune"]["y"])
     # exclusivity over the union of both out-of-sample folds (same as run.py evaluate)
     ex = exclusive(np.r_[data["tune"]["gid"], data["eval"]["gid"]], np.r_[data["tune"]["p"], data["eval"]["p"]])
@@ -66,6 +72,11 @@ def main():
                           list(itertools.product(taus[::2], [0.5, 0.7, 0.8, 0.9, 0.95]))),
         "per_source+excl": (lambda d, t2, t3: d["excl"] & (d["p"] >= np.where(d["src"] == 2, t2, t3)),
                             list(itertools.product(np.arange(0.4, 0.96, 0.05).round(2), repeat=2))),
+        "caps(S2<=5,S3<=6)+threshold+excl": (
+            lambda d, t: source_caps(d["ev"].s1_idx, d["src"], d["p"], d["excl"] & (d["p"] >= t)), [(t,) for t in taus]),
+        "hn_adjust+threshold+excl": (
+            lambda d, t, b: d["excl"] & (hn_adjust(d["p"], d["heq"], d["hld"], b) >= t),
+            list(itertools.product(taus[::2], [0.02, 0.05, 0.1]))),
         "expected_f05_calibrated+excl": (
             lambda d, lam: d["excl"] & expected_f05(d["ev"].s1_idx, np.where(d["excl"], d["pc"], 0.0), d["ev"].n, lam),
             [(x,) for x in (0.0, 0.05, 0.1, 0.2, 0.4)]),

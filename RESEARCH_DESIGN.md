@@ -135,6 +135,31 @@ Missing Python packages here: polars, pyarrow, duckdb, lightgbm, rapidfuzz, spar
 |---|---|---|---|
 | R1-a | 26 Sep | 4 local MDs, guideline PDF, pasted report | baseline inventory |
 | R1-b | 26 Sep | GitHub sweep: 364 repos created 25–26 Sep (282 non-empty, 197 READMEs). 44 READMEs are verbatim copies of the problem statement. Deep read of the 8 repos in §2.1–2.2 | reverse retrieval, competition features, density simulation, LOCO protocol, collective stacking, learned cross-script dictionary, realistic-vs-oracle metric, relative-to-best rule |
+| R2 | 26 Sep 21:45 | Re-sweep: 141 repos new or updated since 19:20 (131 non-empty, 97 READMEs). Public leaderboard snapshot from the user. Deep read: harshgitty58 (PROGRESS.md), mayankgoplani431-del (README + audit), Sid-techweb, Dhruv716-stack, Karthikatstuffmama (via the parallel session) | **validation→leaderboard gap evidence (§2.6)**, house-number guard, digit edit-type features, sibling expansion, hard per-S1 caps (S2 ≤ 5, S3 ≤ 6), dense e5 view for cross-script recall |
+
+### 2.6 Leaderboard evidence (R2): validation does not transfer 1:1
+Public leaderboard snapshot (user, 26 Sep ~21:40): ranks 4–30 all score **0.988–0.990**. The top reported elsewhere is 0.9906.
+
+| Repo | Local validation | Public leaderboard | Gap | Note |
+|---|---|---|---|---|
+| harshgitty58 v1 → v2 | 0.9743 → 0.9842 | 0.967 → 0.969 | −0.007 → **−0.015** | +0.010 validation bought only +0.002 on the leaderboard. Probes: France is not the cause |
+| mayankgoplani431 E02 | 0.9776 | 0.964 | −0.014 | blocking recall 95.4 → 97.5% transferred ~1.5× |
+| mayankgoplani431 S3 | 0.9806 (↑) | 0.956 (↓) | −0.025 | + group/density-sensitive features: ~230k extra test pairs, 60–90% with a different house number than the S1 |
+| mayankgoplani431 E10 (sibling features) | n/a | 0.933 | n/a | withdrawn |
+| Sid-techweb v2/C4 | 0.98322 | 0.970441 | −0.013 | |
+| Dhruv716-stack | 0.9102 | 0.894 | −0.016 | |
+
+**Reading (inferred, consistent across 4 independent repos):**
+- Test has about 2× as many distractors per S1 (5.75 vs 4.67 records per S1; at 3.46 true matches that is ~2.3 vs ~1.2 distractors).
+- Features whose meaning depends on pool density (raw candidate counts, candidate-vs-candidate group features, "is this S1 the target's best", sibling support) make a train-fit model over-confident on test lookalike distractors. The typical case is the same name and street with a different house number.
+- **Validation gains from such features can be leaderboard losses.**
+- Recall gains (blocking) transfer; precision gains from context features may not.
+
+**Consequences for our decisions:**
+1. Judge A1 vs A2 on normal validation **and** density-stressed validation (`density.py`) **and** a label-free test check: predicted pairs per S1 on test vs validation (over-matching on test is a red flag).
+2. House-number guard (features + decoder): separate noise (truncation, zero padding, suffix letter) from substitution (distractor).
+3. Prioritize candidate recall (cross-script xs and dense dn views, parallel session).
+4. Leaderboard slots are scarce (5/day) and the public board is a subset. Use them to test hypotheses (e.g. strict vs loose τ), not to hill-climb.
 
 ### 2.5 Fair-play and licensing position
 - **None** of the competitor repos has a license (default: all rights reserved), and the organisers screen for plagiarism. **We use them for ideas and measured facts only. No code is copied.** Everything we build is written from scratch.
@@ -405,3 +430,4 @@ Decision needed from you: approve E0 + E1 (or pick another), and send the other 
 | Rev | Date | Change |
 |---|---|---|
 | R1 | 2026-09-26 19:30 IST | Initial synthesis: 4 local docs, pasted report, guideline PDF, own data verification, GitHub sweep of 364 challenge-window repos (8 read in depth) |
+| R2 | 2026-09-26 21:50 IST | Leaderboard snapshot + re-sweep (141 new/updated repos). New §2.6: validation→leaderboard gap of 0.013–0.025 across 4 repos, attributed to test distractor density. A1/A2 selection now also requires density-stressed validation and a test over-matching check; house-number guard added |

@@ -21,6 +21,12 @@ Features (each targets an observed error type):
                             the split, learned, so generic words like pvt/llc/sarl drop out)
   num_symdiff, num_reldiff  address-number conflicts (count of unshared numbers; relative
                             gap between first numbers: 245 vs 2454 -> large, 340 vs 345 -> small)
+  num_q_extra, num_t_extra  numbers present on only one side
+  hn_*                      house-number (first number) edit type. True copies show truncation,
+                            padding or suffix noise (2454->245, 1014->014); planted lookalike
+                            distractors substitute digits in a same-length number (340->345).
+                            On test (≈2x distractors per S1) these lookalikes drive false merges
+                            (RESEARCH_DESIGN.md §2.6).
 """
 import re
 import sys
@@ -29,6 +35,7 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 from rapidfuzz import fuzz, process
+from rapidfuzz.distance import Levenshtein
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from ber import config  # noqa: E402
@@ -37,7 +44,8 @@ from ber.utils import done, log, mark_done, save_json, stage  # noqa: E402
 OUT = "featx"
 FEATS = ["n_map_tset", "n_map_ratio", "n_skel_ratio", "n_skel_tset", "q_unm_maxidf", "t_unm_maxidf",
          "q_match_idf", "t_match_idf", "core_inter", "core_jacc", "q_core_n", "t_core_n",
-         "num_symdiff", "num_reldiff"]
+         "num_symdiff", "num_reldiff", "num_q_extra", "num_t_extra",
+         "hn_prefix", "hn_suffix", "hn_lev", "hn_samelen", "hn_subst_small"]
 CORE_DF = 0.01
 
 
@@ -136,7 +144,22 @@ def build(split, mapping):
         first = lambda c: pl.col(c).list.first().str.slice(0, 9).cast(pl.Float64, strict=False)
         df = df.with_columns(qn_=num("ad"), tn_=num("t_ad")).with_columns(
             num_symdiff=pl.col("qn_").list.set_symmetric_difference(pl.col("tn_")).list.len(),
-            num_reldiff=(first("qn_") - first("tn_")).abs() / pl.max_horizontal(first("qn_"), first("tn_")).clip(1))
+            num_reldiff=(first("qn_") - first("tn_")).abs() / pl.max_horizontal(first("qn_"), first("tn_")).clip(1),
+            num_q_extra=pl.col("qn_").list.set_difference(pl.col("tn_")).list.len(),
+            num_t_extra=pl.col("tn_").list.set_difference(pl.col("qn_")).list.len(),
+            h1=pl.col("qn_").list.first(), h2=pl.col("tn_").list.first())
+        both = pl.col("h1").is_not_null() & pl.col("h2").is_not_null()
+        neq = pl.col("h1") != pl.col("h2")
+        df = df.with_columns(
+            hn_prefix=pl.when(both).then((pl.col("h1").str.starts_with(pl.col("h2")) | pl.col("h2").str.starts_with(pl.col("h1"))) & neq),
+            hn_suffix=pl.when(both).then((pl.col("h1").str.ends_with(pl.col("h2")) | pl.col("h2").str.ends_with(pl.col("h1"))) & neq),
+            hn_samelen=pl.when(both).then(pl.col("h1").str.len_chars() == pl.col("h2").str.len_chars()),
+            hn_lev=pl.Series(process.cpdist(df.get_column("h1").fill_null("").to_list(), df.get_column("h2").fill_null("").to_list(),
+                                            scorer=Levenshtein.distance, workers=-1)).cast(pl.Float32))
+        dnum = (first("h1_l") - first("h2_l")).abs()
+        df = df.with_columns(h1_l=pl.concat_list("h1"), h2_l=pl.concat_list("h2")).with_columns(
+            hn_lev=pl.when(both).then(pl.col("hn_lev")),
+            hn_subst_small=pl.when(both).then(pl.col("hn_samelen") & neq & (dnum <= 10)))
         out = df.sort("row").select("rid", "gid", "fold", *[pl.col(f).cast(pl.Float32) for f in FEATS])
         assert out.get_column("gid").equals(base.get_column("gid")), "row alignment broken"
         out.write_parquet(dst)
