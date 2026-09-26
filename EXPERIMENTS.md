@@ -42,6 +42,20 @@ Views per country: name char_wb-3 top-5, address words top-5, combo top-10 (S1 �
 | partition | query S1 | targets | name | addr | combo | rev pairs | candidates | per query S1 | time | peak RSS |
 |---|---|---|---|---|---|---|---|---|---|---|
 | India | 353,705 | 4,133,346 | 1.77M | 1.77M | 3.54M | 33.1M | 14.78M | 41.8 | 34.5 min | 8.8 GB |
+| US | 529,104 | 6,186,873 | 2.65M | 2.65M | 5.29M | 49.5M | 21.66M | 40.9 | 88.3 min* | 9.0 GB |
+
+*US was slowed by a swap event (a parallel job peaked at 9 GB at 21:23).
+
+**Train candidate quality (query folds 0–3, 882,809 S1, 3,056,221 true pairs; labels for measurement only):**
+
+| metric | value |
+|---|---|
+| pair recall (union) | **0.98301** (India 0.9732, US ≈0.989) |
+| entity full recall | 0.94599 |
+| view recall: rev / combo / addr / name | **0.98232** / 0.93549 / 0.74179 / 0.4664 |
+| candidates per S1 | mean 41.3, p50 29, p95 100, max 6,399, zero-candidate S1: 0 |
+
+Reading: the reverse view alone finds 98.2% of true pairs; the three forward views add only +0.07 pt. India's recall gap is mainly cross-script (E-B3), with the xs/dn views queued. For reference, Ayan [R] reported 0.989 at ~45 candidates/S1 with a learned dictionary.
 
 ## E-B3: India blocking misses → cross-script supplementary views (parallel track)
 **Miss analysis** (India train, query folds 0–3, read from `block/train/cand_India.parquet`; labels used for measurement only):
