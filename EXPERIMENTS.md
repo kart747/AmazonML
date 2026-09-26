@@ -42,3 +42,39 @@ Views per country: name char_wb-3 top-5, address words top-5, combo top-10 (S1 �
 | partition | query S1 | targets | name | addr | combo | rev pairs | candidates | per query S1 | time | peak RSS |
 |---|---|---|---|---|---|---|---|---|---|---|
 | India | 353,705 | 4,133,346 | 1.77M | 1.77M | 3.54M | 33.1M | 14.78M | 41.8 | 34.5 min | 8.8 GB |
+
+## E-B3: India blocking misses → cross-script supplementary views (parallel track)
+**Miss analysis** (India train, query folds 0–3, read from `block/train/cand_India.parquet`; labels used for measurement only):
+
+| metric | value |
+|---|---|
+| pair recall | **0.9732** (views: rev 0.9720, combo 0.8918, addr 0.7332, name 0.4117) |
+| entity full recall | 0.9193 |
+| oracle macro F0.5 (perfect matcher on these candidates) | **0.99054** |
+| candidates per query S1 | mean 41.8, p50 29, p95 105, p99 217, max 6,399 |
+| true pairs at reverse rank 0 | 94.5% of all true pairs |
+
+| share of pairs with... | missed (32,933) | found (1,193,708) |
+|---|---|---|
+| Indic-script target name | **53.3%** | 22.7% |
+| empty target address | **33.4%** | 3.1% |
+| S1 name shared by >1 S1 | 78.3% | 43.2% |
+
+Mechanism: anyascii turns "लक्ष्मी" into "lksmi", which has almost no 3-grams in common with "laxmi", so every name view fails. Empty-address targets with a name shared by 30–56 S1 are undecidable by design (left as FN).
+
+**Built (not yet run on real data; sequenced after chain2 by the pipeline session):**
+- `xscript.py` (xs): learned native→Latin dictionary (training folds only) + reverse target→S1 view for non-Latin-script targets.
+- `dense_view.py` (dn): multilingual-e5-small (MIT, 118M) embeddings, reverse top-15 on the GPU, plus a `dn_cos` pair feature (`BER_EXTRA=featdn`).
+- `xscript.py measure/merge --views xs,dn --cap dn=K`: recall gain vs base, and an isolated merged work dir.
+
+**Synthetic check only** (tests/synth_data.py, 25% of India copies in Devanagari; the synthetic vocabulary is tiny, so absolutes are meaningless and xs finds nothing there because max_df removes most n-grams):
+
+| A1, synthetic fold 0 | macro F0.5 | macro P | macro R | oracle |
+|---|---|---|---|---|
+| base | 0.92425 | 0.9983 | 0.7832 | 0.9251 |
+| + xs + dn (rank < 8) | 0.92639 | 0.9853 | 0.8088 | 0.9385 |
+| + dn_cos feature | **0.92945** | 0.9887 | 0.8084 | 0.9385 |
+
+External evidence [S], Karthikatstuffmama/amazon-ml-challenge-2026, 3% dev slice: e5 dense ∪ key blocking gave recall 0.974 → 0.993 and holdout F0.5 +0.0065 (India +0.0128). Per-country τ was flat or worse. Public LB top-10 cut 0.986. A second repo (Dhruv716-stack) reports local 0.9102 → leaderboard 0.894 (−0.016 with France).
+
+**Label-free test token audit (redecode motivation):** unmapped target-only tokens. France: `ndeg` (N°, 3.3%), `st`/saint, `crs`, `q` (fixed in 23c8756 for test prep). India: anyascii'd native state names (`mharastr` 5.2%, `dilli` 3.3%, `uttr prdes`, `krnatk`, …; ≈25% of targets) are not mapped to S1 state codes, so only the RapidFuzz address features are affected (TF-IDF drops frequent state tokens). Logged for a future train+test re-run.
