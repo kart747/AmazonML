@@ -331,3 +331,17 @@ Rank caps lose recall quickly, because reverse-view ranks carry the rare true pa
 
 The confident mass (> 0.99) is unchanged, and the mid-range grows by 10–30% (France about 2×). With eval calibration this would add only ~0.003 FP/S1. So an LB drop of the size above would mean calibration itself breaks on test, most likely on orphan copies of absent S1 entities (hypothesis H1). Thresholds cannot fix that: τ 0.55 → 0.80 moves only 1.3% of test pairs. The fix is density-trained stage 2 (`density_train.py`, queued).
 - LB direction probes, all on sub-3 scores with pruned candidates and subset-checked: `output_variants/xd_s2lab_all_tau080` (3.36/S1), `_tau055` (3.40/S1), `_fr090` (France τ 0.90; 5,837,458 matches). Decisions rest on tune + density, not on public-LB deltas.
+
+## E-X4. Unseen-country adaptation by pseudo-labelling: US→India proxy for France (parallel track)
+France is 15% of test (~15% of the public LB) and has no labels. Proxy: India is treated as unlabeled (`src/experiments/pseudo_label.py`, work_xd s2lab parts, `all` features without dn_cos). τ/variant are always chosen on the **US** tune fold, and results are reported on the **India** eval fold (fold 0). Stage 1 was trained on both countries, so this measures stage-2 transfer only.
+
+| stage 2 trained on | India eval F0.5 | P | R | FP | singleton acc | pairs/S1 |
+|---|---|---|---|---|---|---|
+| US only (unseen-country baseline) | 0.97754 | 0.99276 | 0.95266 | 2,101 | 0.98393 | 3.331 |
+| **US + India pseudo-labels** (p ≥ 0.95 & target's best S1 → 1, p ≤ 0.05 → 0) | **0.98033** (+0.0028) | 0.99274 | 0.95950 | 2,173 | 0.98313 | 3.355 |
+| US + true India labels (oracle) | 0.98667 | 0.99630 | 0.96875 | 1,049 | 0.98996 | 3.372 |
+
+- Pseudo-labels: 1.16M rows, 852,554 positives with 99.76% precision, negatives 1.46% wrong, 117k middle rows dropped.
+- Pseudo-labelling recovers **31%** of the unseen-country gap (0.0028 of 0.0091), all of it through recall. Precision and FP stay flat.
+- Implication for France: the shipped model is in the "US+India → France" position, so a France stage-2 gap of the same order (~0.009 on France, ~0.0014 on the LB at 15% weight) is plausible. Pseudo-labelling France test pairs with the shipped model and retraining stage 2 on train + France pseudo-rows could recover about a third of it. It cannot be validated on France itself; the proxy above is the only evidence.
+- Runtime 13.6 min, 7.2 GB peak at 4 threads.
