@@ -467,3 +467,37 @@ Train (folds 0–3) vs test stage-2 rows of the same country, p1 ≥ 0.05, 200k 
 | India | ×0.917 | 3.370 → 3.370 | 987 | 3.152 → 3.153 |
 
 The pool-size-dependent rate makes names look more ambiguous on test, and the model holds back confident US/France matches. The proper fix is raw counts in stages 1+2 plus a retrain. The cheap test is a label-backed check in amazonml-27's world_sim (US pool 0.5×, same inflation): rescale there and compare F. Status: [HYPOTHESIS] pending that check.
+
+## E-G5. Full leave-one-country-out: both stages trained on US only, scored on India (France's actual position)
+- **Hypothesis:** France is unseen by stage 1 AND stage 2. E-G4 (stage 2 only) understates the loss because p1, 72% of stage-2 gain, was still calibrated on the target country.
+- **Implementation** (`work/chain_loco.sh`, isolated `work_loco`, symlinked work_xd inputs):
+  1. Stage 1 (`A2_loco_stage1_fold{A,B}`, +dn_cos) is trained with only the US feat/featdn parts visible. The India parts are exposed afterwards.
+  2. `build_stage2_parts` writes US OOF / India-averaged p1 → `stage2_lab build`.
+  3. A US-only stage 2 (s2lab_all features) is scored on India eval fold 0.
+  - Runtime: 15 min total (stage 1 4.6 min, feat2 7.6 min, s2lab 2 min), peak 6.6 GB.
+- **Result** (India eval fold 0, thr+excl τ 0.68):
+
+| model in the LOCO world | India F0.5 | P | R |
+|---|---|---|---|
+| US-only stage 2 (unseen) | **0.92193** | 0.96048 | 0.88926 |
+| shipped s2lab_all fed US-only p1 | 0.95839 | 0.97882 | 0.93720 |
+| + one pseudo-label round (`pseudo_label.py`, p≥0.95 & best → 1, p≤0.05 → 0; pos precision 0.978, neg error 0.045) | 0.92922 | | |
+| stage 2 trained on true India labels (oracle) | 0.98325 | | |
+
+  Normal world, in-country: 0.98665.
+- **Stratified (unseen model):**
+
+| India S1 stratum | share | unseen F0.5 | shipped model, US-only p1 |
+|---|---|---|---|
+| true targets all Latin script | 49.5% | 0.93875 | 0.96462 |
+| mixed script | 39.3% | 0.93118 | 0.96521 |
+| all native script | 5.6% | 0.75382 | 0.89299 |
+| singletons | 5.6% | 0.87766 | 0.92145 |
+
+  Candidate recall after the US-only p1 ≥ 1e-3 cascade: 97.6% of true pairs remain.
+- **Reading:**
+  - An unseen country costs ~0.06 F0.5 when both stages are unseen, about 7× E-G4's stage-2-only estimate.
+  - It is not a script effect: Latin-only S1 lose 0.048 too.
+  - A US-only stage 1 is almost harmless once stage 2 has target labels (oracle 0.98325). The damage is in stage 2's learned mapping from a shifted p1/context to a decision.
+  - One pseudo-label round recovers only 0.008 of 0.062.
+- **Implication:** France is plausibly ~0.93. Then with w_FR ≈ 0.15, LB = 0.85·0.985 + 0.15·0.93 ≈ 0.977, which is exactly the observed 0.97741. work_loco is now the label-backed test bed for every France fix: amazonml-46 runs the freq rescale and iterative self-training there, E-G6 ablates feature groups.
