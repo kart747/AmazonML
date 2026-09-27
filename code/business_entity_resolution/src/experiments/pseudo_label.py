@@ -53,9 +53,9 @@ def evaluator(meta, fold, country):
     return Evaluator(idx.get_column("idx").to_numpy(), meta.get_column("y").to_numpy(), pop.get_column("n_true").to_numpy())
 
 
-def fit(tr, tu, feats):
+def fit(tr, tu, feats, weight=None):
     X = lambda d: np.ascontiguousarray(d.select(feats).to_numpy(), dtype=np.float32)
-    dtr = lgb.Dataset(X(tr), tr.get_column("y").to_numpy(), feature_name=feats, free_raw_data=True)
+    dtr = lgb.Dataset(X(tr), tr.get_column("y").to_numpy(), weight=weight, feature_name=feats, free_raw_data=True)
     dva = lgb.Dataset(X(tu), tu.get_column("y").to_numpy(), reference=dtr)
     return lgb.train(config.LGB_PARAMS, dtr, config.LGB_ROUNDS * 2, valid_sets=[dva],
                      callbacks=[lgb.early_stopping(config.LGB_EARLY_STOP, verbose=False), lgb.log_evaluation(0)])
@@ -174,8 +174,12 @@ def main():
     a.add_argument("--ref", default="s2lab_all")
     a.add_argument("--target", default="India")
     a.add_argument("--source", default="US")
-    a.add_argument("--hi", type=float, default=0.95)
+    a.add_argument("--hi", default="0.95", help="positive threshold, or a per-round schedule e.g. 0.99,0.97,0.95")
     a.add_argument("--lo", type=float, default=0.05)
+    a.add_argument("--rounds", type=int, default=1)
+    a.add_argument("--pseudo-weight", type=float, default=1.0)
+    a.add_argument("--no-oracle", action="store_true")
+    a.add_argument("--tag", default="")
     x = a.parse_args()
     feats = lgb.Booster(model_file=str(config.WORK_DIR / "models" / f"{x.ref}.txt")).feature_name()
     tf, uf, ef = list(config.TRAIN_FOLDS), config.TUNE_FOLD, config.EVAL_FOLD
@@ -189,25 +193,41 @@ def main():
         base = fit(src_tr, src_tu, feats)
         out["base"] = report(base, feats, src_tu, ev, x.source, x.target)
         log(f"base ({x.source} only): {x.target} eval F0.5 {out['base']['target_eval']['macro_f05']}")
-        # pseudo-labels on the target's unlabeled train + tune folds
-        pool = pl.concat([tgt_tr, tgt_tu])
-        p = ap._pred(base, np.ascontiguousarray(pool.select(feats).to_numpy(), dtype=np.float32))
-        best = ap.exclusive_mask(pool.get_column("gid").to_numpy(), p)
-        lab = np.where((p >= x.hi) & best, 1, np.where(p <= x.lo, 0, -1))
-        pool = (pool.with_columns(y_true=pl.col("y"), y=pl.Series(lab)).filter(pl.col("y") >= 0)
-                    .with_columns(pl.col("y").cast(src_tr.schema["y"])))
-        yt, yp = pool.get_column("y_true").to_numpy(), pool.get_column("y").to_numpy()
-        out["pseudo_labels"] = {"rows": int(len(yp)), "dropped_middle": int((lab < 0).sum()), "pos": int(yp.sum()),
-                                "pos_precision": round(float(yt[yp == 1].mean()), 5),
-                                "neg_error": round(float(yt[yp == 0].mean()), 5)}
-        log(f"pseudo labels: {out['pseudo_labels']}")
-        ps = fit(pl.concat([src_tr, pool.drop("y_true")]), src_tu, feats)
-        out["pseudo"] = report(ps, feats, src_tu, ev, x.source, x.target)
-        log(f"pseudo: {x.target} eval F0.5 {out['pseudo']['target_eval']['macro_f05']}")
+        # self-training: each round pseudo-labels the target's unlabeled train+tune folds with the
+        # latest model (confidence schedule x.hi per round) and retrains source + pseudo rows
+        pool0 = pl.concat([tgt_tr, tgt_tu])
+        Xpool = np.ascontiguousarray(pool0.select(feats).to_numpy(), dtype=np.float32)
+        gpool, ytrue = pool0.get_column("gid").to_numpy(), pool0.get_column("y").to_numpy()
+        his = [float(h) for h in str(x.hi).split(",")]
+        his += [his[-1]] * (x.rounds - len(his))
+        cur, out["rounds"] = base, []
+        for r in range(x.rounds):
+            p = ap._pred(cur, Xpool)
+            best = ap.exclusive_mask(gpool, p)
+            lab = np.where((p >= his[r]) & best, 1, np.where(p <= x.lo, 0, -1))
+            keep = lab >= 0
+            pool = pool0.filter(pl.Series(keep)).with_columns(y=pl.Series(lab[keep]).cast(src_tr.schema["y"]))
+            yt, yp = ytrue[keep], lab[keep]
+            info = {"round": r + 1, "hi": his[r], "rows": int(keep.sum()), "dropped_middle": int((~keep).sum()),
+                    "pos": int(yp.sum()), "pos_precision": round(float(yt[yp == 1].mean()), 5),
+                    "pos_recall_of_true": round(float((yp[yt == 1] == 1).mean()), 5) if (yt == 1).any() else None,
+                    "neg_error": round(float(yt[yp == 0].mean()), 5)}
+            w = None
+            if x.pseudo_weight != 1.0:
+                w = np.r_[np.ones(src_tr.height), np.full(pool.height, x.pseudo_weight)]
+            cur = fit(pl.concat([src_tr, pool]), src_tu, feats, weight=w)
+            info["target_eval"] = report(cur, feats, src_tu, ev, x.source, x.target)
+            out["rounds"].append(info)
+            log(f"round {r + 1} (hi {his[r]}): labels pos {info['pos']:,} prec {info['pos_precision']} "
+                f"neg_err {info['neg_error']} -> {x.target} eval F0.5 {info['target_eval']['target_eval']['macro_f05']}")
+        out["pseudo"] = out["rounds"][0]["target_eval"]
+        if x.no_oracle:
+            save_json(out, config.WORK_DIR / "reports" / f"pseudo_label_{x.target}{x.tag}.json")
+            return
         orc = fit(pl.concat([src_tr, tgt_tr]), pl.concat([src_tu, tgt_tu]), feats)
         out["oracle"] = report(orc, feats, src_tu, ev, x.source, x.target)
         log(f"oracle (true {x.target} labels): {x.target} eval F0.5 {out['oracle']['target_eval']['macro_f05']}")
-    save_json(out, config.WORK_DIR / "reports" / f"pseudo_label_{x.target}.json")
+    save_json(out, config.WORK_DIR / "reports" / f"pseudo_label_{x.target}{x.tag}.json")
 
 
 if __name__ == "__main__":
