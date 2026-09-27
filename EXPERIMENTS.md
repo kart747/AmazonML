@@ -586,3 +586,16 @@ Prompted by amazonml-27's LOCO finding: unseen-country misses are obvious matche
 - **France test fingerprint:** one-side-only name tokens in the uncertain band (p 0.1–0.9), relative to p>0.99 pairs: snc 149×, associes 48×, club/ecole/amicale/comite/centre ~4×.
 - **Follow-up E-G7** (`legal_strip.py`, strip legal-form tokens for the unseen country, validated first on India in work_loco): written, NOT run. The user paused heavy runs, as relayed by amazonml-01. amazonml-01's E-X11 also shows legal-form differences carry label signal in US train (a different form is true 36% of the time vs 93% for the same form; one-sided 73%), so blanket stripping is doubtful for France. The one-sided case is the open question.
 - **Self-training** (amazonml-46, same world): 3 rounds lift 0.92142 → 0.92979 → 0.93072 → 0.93130, with pseudo-negative error 4.5% → 8.5%.
+
+## E-X10. Iterative self-training in the France analogue (work_loco: stage 1 + 2 trained on US only → India fold 0; τ from the US tune fold)
+
+| run | round 1 | round 2 | round 3 | pseudo-positive precision (r1 → last) | pseudo-negative error (r1 → last) |
+|---|---|---|---|---|---|
+| base (US only) | 0.92142 | | | | |
+| hi 0.95, lo 0.05 | 0.92979 | 0.93072 | **0.93130** | 0.978 → 0.964 | 4.5% → 8.5% |
+| hi 0.99 → 0.97 → 0.95, lo 0.05 | 0.92718 | 0.92808 | (stopped at 11:21, user pause) | 0.986 → 0.975 | 4.5% → 9.4% |
+
+- Self-training recovers **+0.0099 of the ~0.06** unseen-country loss after 3 rounds, with diminishing returns. The oracle (true India labels) is 0.98325.
+- A stricter confidence schedule is worse. More labelled rows beat cleaner labels here.
+- The pseudo-negative error grows each round. Those are amazonml-27's "obvious misses" (Pvt Ltd vs Private Limited, native script) fed back as negatives, which reinforces the transfer error. The next variants (positives-only `--lo -1`, `--lo 0.01`) are queued in `work/chain_x11.sh` but **not run** (user pause on heavy jobs, relayed 11:20). They are expected to compose with amazonml-27's legal-form stripping (`legal_strip.py`, also paused).
+- Runtime ~14 min per 3-round run, 8.8 GB peak.
