@@ -72,8 +72,8 @@ def per_country(pairs: pl.DataFrame, pop: pl.DataFrame, excl: np.ndarray) -> dic
     return out
 
 
-def diagnose(approach):
-    W, name = config.WORK_DIR, f"A{approach}{TAG}"
+def diagnose(approach, name=None):
+    W, name = config.WORK_DIR, name or f"A{approach}{TAG}"
     test = pl.read_parquet(W / "reports" / f"test_{name}_pairs.parquet", columns=["rid", "gid", "p"])
     s1t = pl.read_parquet(W / "prep" / "s1_test.parquet", columns=["rid", "country"])
     rep = {"test": per_country(test, s1t, exclusive_mask(test.get_column("gid").to_numpy(), test.get_column("p").to_numpy()))}
@@ -134,9 +134,11 @@ def main():
     ap.add_argument("--tau", type=float, default=None, help="global threshold (default: the one chosen on the tune fold)")
     ap.add_argument("--country-tau", action="append", default=[], metavar="COUNTRY=TAU")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--name", default=None, help="diagnose only: score name instead of A<n><tag>, e.g. s2lab_all "
+                    "(reads reports/test_<name>_pairs.parquet and scores_<name>.parquet)")
     a = ap.parse_args()
     if a.cmd == "diagnose":
-        diagnose(a.approach)
+        diagnose(a.approach, a.name)
         return
     if not a.out:
         sys.exit("--out is required for write (never overwrite the main output/ by accident)")
