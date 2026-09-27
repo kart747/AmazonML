@@ -17,3 +17,10 @@ Never tune repeatedly against the public score; use it to check direction only.
 | | | | | | | | |
 
 **Audit reserve used (2026-09-27, amazonml-5e):** S1 folds 4–9 are consumed as extra stage-2 training rows (`work_f49/`, chain_f49.sh). From this point only tune fold 3 and eval fold 0 remain held out. Any submission built on f49-trained models has no untouched audit fold.
+
+## Clean submission packages (`submission/<id>/`)
+Each package is an isolated, read-only copy made from a validated source. It holds `output/matching_results.tsv` (the leaderboard upload), `output/candidate_pairs.tsv` (the final zip), `decision.json`, `metadata.json`, `SHA256SUMS`, `validation.txt` (official validator output) and a `README.md`. Validate and lock with `submission/validate_package.sh submission/<id>`. Never edit a package; a change means a new ID. The TSVs are not in git; verify any copy with `sha256sum -c SHA256SUMS`.
+
+| ID | Local macro F0.5 (fold 0) | Approach | Path | sha256 matching (candidates) | Validator | Git | Public LB F0.5 |
+|---|---|---|---|---|---|---|---|
+| sub03p_xd_s2lab_all | 0.98742 (tune 0.98783; density 0.98498) | xd candidates + stage2_lab `all`, thr+excl τ 0.68; candidates = stage-2-scored set, 5.53/S1 (= row 3p) | `submission/sub03p_xd_s2lab_all/output/matching_results.tsv` | f9ff0a26696ca3d6… (23caf70a1767123e…) | pending (gated run after f49 features; see `validation.txt`). Source copy: PASS 07:56 | generated at fc01362; candidate writer 2fa73e1 | |

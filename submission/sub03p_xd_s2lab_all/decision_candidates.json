@@ -1,0 +1,7 @@
+{
+  "source_scores": "test_s2lab_all_pairs.parquet",
+  "candidates": "pairs scored by the final model",
+  "candidate_pairs": 9585603,
+  "candidates_per_s1": 5.533,
+  "matched_pairs": 5860806
+}

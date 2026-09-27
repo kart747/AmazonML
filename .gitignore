@@ -9,3 +9,6 @@ output_variants/
 __pycache__/
 *.pyc
 .DS_Store
+
+# submission packages: TSVs are too large for git (verify with SHA256SUMS); metadata is tracked
+submission/**/output/*.tsv

@@ -1,0 +1,95 @@
+{
+  "submission_id": "sub03p_xd_s2lab_all",
+  "status": "packaged; validator result in validation.txt",
+  "upload_file": "output/matching_results.tsv",
+  "files": {
+    "output/matching_results.tsv": {
+      "sha256": "f9ff0a26696ca3d64e847422f507bc28c6d27a78bc2b2ab41043b152751f1ba6",
+      "data_rows": 1732544,
+      "header": "source1_entity_id\tmatched_entity_ids",
+      "matched_pairs": 5860806,
+      "s1_nonempty": 1633049
+    },
+    "output/candidate_pairs.tsv": {
+      "sha256": "23caf70a1767123e3b01c8b136436aa0f8bd677561266aa55ec5dfea2eb70a54",
+      "data_rows": 1732544,
+      "header": "source1_entity_id\tcandidate_entity_ids",
+      "candidate_pairs": 9585603,
+      "candidates_per_s1": 5.533
+    }
+  },
+  "copied_from": {
+    "matching_results.tsv": "output_variants/xd_s2lab_all_pruned/ (byte-identical, cmp) = output_variants/xd_s2lab_all/ matching (byte-identical)",
+    "candidate_pairs.tsv": "output_variants/xd_s2lab_all_pruned/ (byte-identical, cmp)"
+  },
+  "approach": "xd candidates + s2lab_all: per-country TF-IDF retrieval (name/addr/combo S1->target, combo target->S1) + India cross-script views (xs learned native->Latin dictionary rank<2, dn multilingual-e5-small rank<1) -> A2_xd stage 1 (LightGBM, cross-fitted, +dn_cos) as learned filter p1>=1e-3 -> stage2_lab 'all' LightGBM (92 features: A2 stage-2 + 17 cluster/twin/glue features + 21 featx; no dn_cos) -> threshold+exclusivity",
+  "decoder": {
+    "variant": "threshold+excl",
+    "tau": 0.68,
+    "chosen_on": "tune fold 3",
+    "tune_f05": 0.98783
+  },
+  "candidate_generation": {
+    "retrieval_views_K": {
+      "name_char3_tfidf": 5,
+      "addr_word_tfidf": 5,
+      "combo": 10,
+      "reverse_combo_target_to_S1": 8,
+      "xs_reverse": "rank<2 (non-Latin-script targets)",
+      "dn_reverse_e5": "rank<1 (non-Latin-script targets)"
+    },
+    "tfidf": {
+      "fit_sample": 2000000,
+      "name_max_df": 0.05,
+      "addr_max_df": 0.05
+    },
+    "merge_command": "xscript.py merge --views xs,dn --cap xs=2,dn=1",
+    "learned_filter": "stage-1 p1 >= 1e-3 (stage2_lab PRUNE); candidate_pairs.tsv = exactly the pairs stage 2 scores",
+    "test_retrieval_pairs": 86400750,
+    "test_retrieval_per_s1": 49.87,
+    "test_final_candidates_per_s1": 5.533
+  },
+  "local_validation": {
+    "protocol": "S1 folds int(id)%10: train {1,2}, tune {3}, eval {0}; eval reported once",
+    "eval_fold0_macro_f05": 0.98742,
+    "macro_precision": 0.99665,
+    "macro_recall": 0.97018,
+    "pair_precision": 0.99687,
+    "pair_recall": 0.97038,
+    "false_positive_pairs": 2328,
+    "singleton_accuracy": 0.99045,
+    "tune_fold3_macro_f05": 0.98783,
+    "density_check_drop19_eval_at_normal_tau": 0.98498,
+    "density_loss": -0.00244,
+    "blocking_oracle_eval_fold0": 0.99631,
+    "eval_fold0_candidate_pair_recall_after_filter": 0.98779
+  },
+  "git": {
+    "generated_at_head": "fc01362 (06:40; stage2_lab code a387fb0, xscript/dense_view as committed)",
+    "candidate_writer": "2fa73e1 (redecode.py pruned; code identical to what produced the file at 07:49)",
+    "reproduce_from": "2fa73e1 or later",
+    "packaged_at": null
+  },
+  "model_files_sha256_16": {
+    "work_xd/models/s2lab_all.txt": "f62d7b1cc1ca3d4f",
+    "work_xd/models/A2_xd_stage1_foldA.txt": "ef6d0b7b95d76206",
+    "work_xd/models/A2_xd_stage1_foldB.txt": "4219934c246dd207",
+    "work/reports/xscript_dictionary.parquet": "4b9158675b5b1dc0"
+  },
+  "reproduce": [
+    "cd code/business_entity_resolution; python src/run.py prepare && python src/run.py block && python src/run.py features   # base work/ (train+test)",
+    ".venv-dense/bin/python src/experiments/dense_view.py build --split train|test   # e5 dense view (GPU)",
+    "python src/experiments/xscript.py build --split train|test",
+    "python src/experiments/xscript.py merge --split train|test --dst ../../work_xd --views xs,dn --cap xs=2,dn=1   (+ symlink US/France feat parts; see work/chain_x2.sh, chain_x3.sh)",
+    "BER_WORK_DIR=../../work_xd python src/run.py features --split train|test; BER_WORK_DIR=../../work_xd python src/experiments/dense_view.py features --split train|test",
+    "BER_WORK_DIR=../../work_xd BER_EXTRA=featdn BER_TAG=_xd python src/run.py evaluate --approach 2   # A2_xd stage 1 + feat2_xd",
+    "BER_WORK_DIR=../../work_xd python src/experiments/features_v2.py; ln -s feat2_xd work_xd/feat2; stage2_lab.py build --split train|test --extra featx   (see work/chain_x4.sh)",
+    "BER_WORK_DIR=../../work_xd python src/experiments/stage2_lab.py evaluate --variant all --drop dn_cos",
+    "BER_WORK_DIR=../../work_xd python src/experiments/stage2_lab.py predict --variant all --out <dir>",
+    "BER_WORK_DIR=../../work_xd python src/experiments/redecode.py pruned --name s2lab_all --out <dir>"
+  ],
+  "leaderboard": {
+    "public_f05": null,
+    "uploaded_at": null
+  }
+}
