@@ -86,6 +86,17 @@ def test_parallel_modules():
         else:
             print("dense view skipped (set BER_DENSE_PY to a python with torch + transformers)")
 
+        # ---- density-augmented stage 2 (density_train.py) on the stage2_lab `new` features
+        sh([SRC / "experiments" / "stage2_lab.py", "build", "--split", "train"], env)
+        sh([SRC / "experiments" / "stage2_lab.py", "evaluate", "--variant", "new"], env)
+        sh([SRC / "experiments" / "density_train.py", "build"], env)
+        sh([SRC / "experiments" / "density_train.py", "evaluate", "--ref", "s2lab_new"], env)
+        dt = json.load(open(tmp / "work" / "reports" / "density_train_dense.json"))
+        ref = json.load(open(tmp / "work" / "reports" / "s2lab_new.json"))
+        assert dt["ref"]["normal"]["eval"]["macro_f05"] == ref["eval"]["macro_f05"], "ref model must reproduce stage2_lab"
+        print("density_train: ref normal", dt["ref"]["normal"]["eval"]["macro_f05"], "new dense",
+              dt["new"]["dense"]["eval"]["macro_f05"])
+
         # ---- redecode: diagnostics + a variant submission
         print(sh([SRC / "experiments" / "redecode.py", "diagnose", "--approach", "2"], env)[-1500:])
         out = tmp / "variant"
