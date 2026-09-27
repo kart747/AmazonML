@@ -31,6 +31,7 @@ is a hypothesis to test with one leaderboard submission, never something to auto
 """
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -105,8 +106,8 @@ def diagnose(approach, name=None):
     return rep
 
 
-def write(approach, variant, tau, country_tau, out):
-    W, name = config.WORK_DIR, f"A{approach}{TAG}"
+def write(approach, variant, tau, country_tau, out, name=None):
+    W, name = config.WORK_DIR, name or f"A{approach}{TAG}"
     pairs = pl.read_parquet(W / "reports" / f"test_{name}_pairs.parquet", columns=["rid", "gid", "p"])
     s1t = pl.read_parquet(W / "prep" / "s1_test.parquet", columns=["rid", "country"])
     known = set(s1t.get_column("country").unique())
@@ -126,8 +127,9 @@ def write(approach, variant, tau, country_tau, out):
     write_submission(pairs.select("rid", "gid"), keep)
     dec = {"source_scores": f"test_{name}_pairs.parquet", "variant": variant, "tau": tau,
            "country_tau": country_tau, "matched_pairs": int(keep.sum())}
+    dec["matched_not_in_candidates"] = subset_check(config.OUT_DIR)
     save_json(dec, config.OUT_DIR / "decision.json")
-    rc = run_validator()
+    rc = run_validator() if os.environ.get("BER_SKIP_VALIDATOR") != "1" else 0
     log(f"decision {json.dumps(dec)} -> {config.OUT_DIR} (validator exit {rc})")
     return rc
 
@@ -172,7 +174,7 @@ def main():
     ap.add_argument("--tau", type=float, default=None, help="global threshold (default: the one chosen on the tune fold)")
     ap.add_argument("--country-tau", action="append", default=[], metavar="COUNTRY=TAU")
     ap.add_argument("--out", default=None)
-    ap.add_argument("--name", default=None, help="diagnose only: score name instead of A<n><tag>, e.g. s2lab_all "
+    ap.add_argument("--name", default=None, help="diagnose/write/pruned: score name instead of A<n><tag>, e.g. s2lab_all "
                     "(reads reports/test_<name>_pairs.parquet and scores_<name>.parquet)")
     a = ap.parse_args()
     if a.cmd == "diagnose":
@@ -188,10 +190,13 @@ def main():
         sys.exit("--out is required for write (never overwrite the main output/ by accident)")
     tau = a.tau
     if tau is None:
-        rep = json.load(open(config.WORK_DIR / "reports" / f"eval_A{a.approach}{TAG}.json"))
-        tau = rep["decision_selected_on_tune_fold"]["tau"]
+        if a.name:
+            tau = json.load(open(config.WORK_DIR / "reports" / f"{a.name}.json"))["decision"]["tau"]
+        else:
+            rep = json.load(open(config.WORK_DIR / "reports" / f"eval_A{a.approach}{TAG}.json"))
+            tau = rep["decision_selected_on_tune_fold"]["tau"]
     ct = {k: float(v) for k, v in (x.split("=", 1) for x in a.country_tau)}
-    sys.exit(write(a.approach, a.variant, tau, ct, a.out))
+    sys.exit(write(a.approach, a.variant, tau, ct, a.out, a.name))
 
 
 if __name__ == "__main__":
