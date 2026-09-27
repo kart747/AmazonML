@@ -1,0 +1,10 @@
+{
+  "source_scores": "test_s2lab_all_pairs.parquet",
+  "variant": "threshold+excl",
+  "tau": 0.68,
+  "country_tau": {
+    "France": 1.01
+  },
+  "matched_pairs": 4977793,
+  "matched_not_in_candidates": 0
+}

@@ -240,6 +240,7 @@ Worth: ★★★ must-have · ★★ test early · ★ test if time · ✗ skip.
 | **Train on the blocker's own candidates** (negatives = retrieved non-matches) | all strong repos | ★★★ (natural hard negatives, no special sampling) |
 | Density-matched training (drop ~19% of S1s so their targets become distractors) | Ayan (+0.0014 under dense eval) | ★★ |
 | Ditto-style augmentation (swap/delete) | Ditto via pasted report | ✗ (GBDT on real candidates suffices) |
+| OOF-mined false positives upweighted (duplicate row = weight 2) | origin/hard-negative-mining (Yashwin69); `hard_negative_lab.py` (A2 feat2), `hard_negative_s2.py` (s2lab / dense_mix) | ? (tooling smoke-tested; not measured on real folds yet, E-X10) |
 
 ### G. ML models
 | Technique | Source | Evidence | Worth |
@@ -433,3 +434,4 @@ Decision needed from you: approve E0 + E1 (or pick another), and send the other 
 |---|---|---|
 | R1 | 2026-09-26 19:30 IST | Initial synthesis: 4 local docs, pasted report, guideline PDF, own data verification, GitHub sweep of 364 challenge-window repos (8 read in depth) |
 | R2 | 2026-09-26 21:50 IST | Leaderboard snapshot + re-sweep (141 new/updated repos). New §2.6: validation→leaderboard gap of 0.013–0.025 across 4 repos, attributed to test distractor density. A1/A2 selection now also requires density-stressed validation and a test over-matching check; house-number guard added |
+| R3 | 2026-09-27 11:30 IST | Re-sweep, Siva402-ai/amazon-ml-challenge-2026 read in depth. Their facts: v2/C4 LB 0.970441 at local DEV 0.98322 (gap −0.013, like ours −0.010). A sibling/cluster-agreement feature run (E10) scored LB 0.933, so they now require features that are direct S1↔record evidence and invariant to duplicating other records (0 decision flips under k=1..8 duplication). Their US↔India transfer proxy puts an unseen country at ~0.93–0.945 (ours: E-G5 0.922), with one self-training round at p≥0.98/≤0.02 worth +0.0027 averaged over both directions, and a second round hurting (confirmation bias). France-only v4: French-locale normalisation (region names ↔ department codes, legal/filler words such as Compagnie/Cie) plus self-training at τ 0.9; LB not reported. v3 'roles' features (premise/unit/floor numbers) gave +0.001 locally, LB untested. Ideas only, no code copied (unlicensed repo). |

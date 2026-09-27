@@ -1,0 +1,15 @@
+{
+  "submission_id": "sub06probe_xd_s2lab_all_frblank",
+  "purpose": "diagnostic: absolute France F0.5 on the public LB, from ONE upload",
+  "upload_file": "output/matching_results.tsv",
+  "files": {
+    "output/matching_results.tsv": {"sha256": "6ef0446659f14e867a5d31d451f261dcce7f5de47236e9ff2345c2387ae4d990", "data_rows": 1732544, "matched_pairs": 4977793},
+    "output/candidate_pairs.tsv": {"sha256": "23caf70a1767123e3b01c8b136436aa0f8bd677561266aa55ec5dfea2eb70a54", "data_rows": 1732544, "candidate_pairs": 9585603, "candidates_per_s1": 5.533}
+  },
+  "copied_from": "output_variants/xd_s2lab_all_frblank (byte-identical, cmp); also reproduced byte-identically by redecode.py write",
+  "approach": "PROBE, not a candidate: upload #1 (sub03p, sha f9ff0a26, public LB 0.97741) with every France S1 emptied (France tau 1.01). The 1,473,092 US/India rows are byte-identical to upload #1.",
+  "local_validation": {"note": "F_FR = s_FR + (0.97741 - LB(this)) / w_FR, w_FR ~ 259452/1732544 = 0.1498, s_FR ~ 0.054 (U1 predicted-empty share of France S1; fold-0 true empty share 0.056)"},
+  "git": {"code": "redecode.py caa8780"},
+  "reproduce": ["BER_WORK_DIR=../../work_xd python src/experiments/redecode.py write --name s2lab_all --variant threshold+excl --tau 0.68 --country-tau France=1.01 --out <dir>"],
+  "leaderboard": {"public_f05": null, "uploaded_at": null}
+}

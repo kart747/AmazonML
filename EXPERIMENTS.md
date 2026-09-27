@@ -508,3 +508,21 @@ The pool-size-dependent rate makes names look more ambiguous on test, and the mo
 - Flat at every τ in 0.5–0.9.
 
 The per-split rate makes train vs test perfectly separable but does not drive errors. **Not used**, and no upload spent. amazonml-27's full LOCO (E-G5) puts the unseen-country loss at **~0.06** (0.922 vs 0.983 oracle), which matches France ≈ 0.93 on the LB. One pseudo-label round gives +0.008 there. Iterative self-training (3 rounds, fixed 0.95 or a 0.99 → 0.95 schedule) is queued in work_loco (`work/chain_x10.sh`).
+
+## E-X10. Hard-negative mining: review of origin/hard-negative-mining and a port to the shipped stage 2
+
+**Branch (Yashwin69, 2 commits, `hard_negative_lab.py`).** Merged into main unchanged (8f62d41) so the original is kept, then fixed on top. Idea: score train folds 1/2 out-of-fold (each by a model fit on the other fold, early-stopped on the tune fold), take negatives with p ≥ the baseline's tuned τ, cap them at 5 per S1 ∪ 5 per target, append them once more, and refit. The folds are clean: fold 3 is only used for early stopping and τ, and fold 0 only for the report. No leakage found. Issues fixed:
+- **Wrong parts under a run tag.** The script reads `sub="feat2"`, but `approaches.evaluate` uses `feat2{BER_TAG}`. Under `BER_TAG=_xd` (the shipped A2_xd stage 1) it silently trained and scored on the old untagged stage-2 parts. Every tag also wrote the same `hard_negative_A2.json`. It now uses `feat2{TAG}`, and the output names carry the tag. Smoke test: the original crashes on a tagged-only work dir, and on work_xd it would read the stale `feat2`.
+- **Memory.** The train folds were loaded twice, the tune fold three times, and the augmented set was a full `np.concatenate` copy, so peak memory was about 3× the train matrix (18M rows × 54 features ≈ 3.9 GB each on work_xd). Now each fold is loaded once.
+- **Duplication → sample weight.** Appending a mined row once equals weight 2 in expectation (bagging_fraction 0.8, so not bit-identical). The script now uses `--weight` (default 2.0) and makes no copy.
+- **Mining rule vs the decision it claims to model.** The docstring says a hard negative "would have been a false positive in production", but the rule ignored exclusivity. Production uses threshold+excl, so a pair that loses its target to a higher-scored S1 is never emitted. `--mine-rule decision` (the default) now applies the baseline's selected variant; `--mine-rule threshold` reproduces the original. Synthetic check with shared targets: 134 → 47 mined, each at its target's OOF maximum.
+- **Baseline.** The script refit the baseline even though `A2{TAG}_stage2` already holds the same fit. It now reuses that model when the feature lists match (`--retrain-baseline` to refit).
+
+**Why it does not transfer as-is.** The branch targets the A2 stage 2 (54 features, unpruned feat2), but upload #1 is stage2_lab `all` on s2lab parts (92 features, p1 ≥ 1e-3 cascade). `hard_negative_s2.py` ports the idea to that pipeline:
+- `mine` scores folds 1/2 OOF with the same row set and world mix as the final model.
+- `evaluate` weights the mined negatives, with an optional `--cap`, and hard positives via `--pos-weight`. It scores exactly like density_train (normal world plus the 19%-dense world, τ from fold 3) and writes `reports/density_train_<name>.json`, so `density_train.py predict` and `world_sim.py score` work on `models/s2lab_<name>.txt`.
+
+**Measured so far (work_xd, dense_mix rows, 3.94M):** OOF mining at τ 0.68 finds **12,394** hard negatives. The weight-2 refit was stopped by request before it finished (laptop load), so **there is no F0.5 result yet**. Reference to beat: dense_mix normal tune 0.98768 / eval 0.98743 / FP 2,162; dense eval at normal τ 0.98625. Both scripts pass end-to-end smoke tests on a 9k-row synthetic work dir (mine, evaluate with and without the mix, cap, pos-weight, baseline reuse, both mine rules).
+
+**To run (heavy: full LightGBM fit on 3.94M rows plus 4 scoring passes, ~3.3 GB RSS seen before it was stopped; not rerun):**
+`BER_WORK_DIR=../../work_xd BER_THREADS=8 python src/experiments/hard_negative_s2.py evaluate --mix --weight 2 --mine-tau 0.68 --tag _w2` (the OOF file `reports/hn_oof_mix.parquet` already exists).
