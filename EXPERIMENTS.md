@@ -263,3 +263,13 @@ Same 19% S1 drop as density.py (seed 42). Pool-dependent context is recomputed, 
 | total | 3.39 → 3.36 | 0.942 → 0.942 | |
 
 The direction matches the density simulation (fewer orphan-lookalike FPs). France moves most; it is unseen, so this is the thing to watch on the leaderboard. Status: [MACRO F0.5 VERIFIED fold 0: 0.98550] [density-checked] [test file validated]. Handed to 4f as submission 2.
+
+### E-M4. Stage 1 retrained with featx (BER_EXTRA=featx BER_TAG=_s1fx) → s2lab `all` (`work/chain_s1fx.sh`)
+Stage-1 validation logloss 0.00769 → **0.00513 / 0.00507** (fold A / B, −34%). But stage 2 already used featx, so little carries over:
+
+| | tune | eval | FP | dense tune | dense eval (normal τ) | test pred/S1 |
+|---|---|---|---|---|---|---|
+| s2lab_all (submission 2) | 0.98579 | 0.98550 | 2,142 | 0.98315 | 0.98323 | 3.36 |
+| s2lab_all_s1fx | 0.98594 | 0.98579 | 2,053 | 0.98337 | 0.98351 | 3.37 |
+
+Δ tune +0.00015 and Δ dense tune +0.0002, both below the +0.001 gate. **Not adopted.** The test file is kept as a validated backup (`output_variants/s2lab_all_s1fx/`, PASS). Runtime ~80 min: stage-1 fits 7–8 min each at 8 threads (6.2 GB); feat2 train+test is the bulk.
