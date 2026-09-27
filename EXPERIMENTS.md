@@ -451,3 +451,19 @@ All deltas are within ±0.0001 (noise), and none of the four features is in the 
 
 - **Reading:** an unseen country costs about −0.009 with stage 2 alone. The failure mode is country-specific: recall for India (tokens/scripts US never shows), precision for US (2.4× the in-country FP). No single τ fixes both: raising τ helps the precision-limited direction (+0.0022 at 0.85) and cannot help the recall-limited one.
 - **Implication for France:** with w_FR ≈ 0.15, a France F0.5 of ~0.93–0.96 is plausible and could account for most of the −0.010 LB gap. Whether France is precision- or recall-limited decides the fix (France τ up vs pseudo-labels/renorm). U3 (France-blank probe) measures its F0.5. The full LOCO (stage 1 also trained on US only, `work/chain_loco.sh`) is running as E-G5.
+
+## E-X9. Adversarial validation of stage-2 inputs and the name-frequency scale (`adversarial.py`)
+Train (folds 0–3) vs test stage-2 rows of the same country, p1 ≥ 0.05, 200k per side, LightGBM, 30% held-out AUC:
+- **All features: AUC 1.0000 (US and India).** The separators are q_nm_freq, t_nm_freq and the featx IDF features (q/t_unm_maxidf, q/t_match_idf). These are computed **per split**: name frequency is count·1e6 / n_S1(country, split). A unique name is 0.76 in US train (1.32M S1), 1.51 in US test (663k) and **3.85 in France test** (259k), which is what a name shared by ~5 S1 looks like in US train.
+- **Without freq/idf: AUC 0.728 (US), 0.665 (India).** The shift is density context: q_ncand 41.6 → 49.3 (US), p1_qsum, t_gap12, rev_margin, r_combo, q_rank. The density simulations already cover this (E-D1, E-X6, amazonml-27's E-G3: ≤ −0.003).
+
+**Counterfactual** (dense_mix stage 2, test q_nm_freq/t_nm_freq multiplied back to the train count scale; stage 1 untouched):
+
+| test country | factor | kept (p ≥ 0.68)/S1 | pairs flipping | >0.99 mass/S1 |
+|---|---|---|---|---|
+| France (US scale) | ×0.196 | 3.384 → 3.407 | 7,852 | 3.058 → 3.079 |
+| France (India scale) | ×0.294 | 3.384 → 3.409 | 8,671 | 3.058 → 3.077 |
+| US | ×0.501 | 3.387 → 3.397 | 8,533 | 3.208 → 3.239 |
+| India | ×0.917 | 3.370 → 3.370 | 987 | 3.152 → 3.153 |
+
+The pool-size-dependent rate makes names look more ambiguous on test, and the model holds back confident US/France matches. The proper fix is raw counts in stages 1+2 plus a retrain. The cheap test is a label-backed check in amazonml-27's world_sim (US pool 0.5×, same inflation): rescale there and compare F. Status: [HYPOTHESIS] pending that check.
