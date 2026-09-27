@@ -649,3 +649,63 @@ France sits 10–43% of the way from in-country to unseen on these statistics, w
   - `output_variants/xd_dense_mix_guard` (30b40af80b25)
   - package `submission/sub07_xd_s2lab_all_guard` (locked)
 - Non-target countries are byte-identical to upload #1 in `_veto` (France: 1 row) and `_frhn` (US/India: 0 rows).
+
+## E-G9. Guard audit: every lb_guards rule in every labeled world; label-free France rules rejected (`guard_audit.py`)
+Labeled worlds (τ 0.68, thr+excl):
+- **normal:** folds 3 and 0 (s2lab_all, s2lab_dense_mix).
+- **world:** the test-density simulation (`s2lab_world`, US 50% deleted and India 19% orphanized).
+- **loco:** the unseen-country proxy (US-only stage 1+2 → India).
+
+Veto tokens are learned on the *other* fold. In LOCO they are learned from US rows only. Output: `work_xd/reports/guard_audit.json` and `guard_audit_removed.parquet`.
+
+| rule | normal (4 cells × 2 models) | world (same) | LOCO unseen, India f3 / f0 | LOCO in-country |
+|---|---|---|---|---|
+| veto (train-learned tokens) | +0.00002…+0.00007, **0 true removed** in every cell | +0.00002…+0.00008, 0 true | **+0.00345 / +0.00366** (1,306 / 1,345 removed, 0 true) | +0.0008 / +0.0010 |
+| lfveto (label-free token discovery) | US **−0.0002** (~400 removed, **399 true**); India +0.00005 | US −0.0002 (~180 true) | +0.00665 / +0.00656 (1–2 true) | +0.0027 / +0.0028 |
+| hn_all (France house-number rule on US/India, control) | −0.00002…−0.00008, removals ~100% true | same | ≈0 | ≈0 |
+
+**Veto passes every gate.**
+- It removed 0 true pairs in all 16 in-country/world cells.
+- The unseen-country proxy shows it targets a failure that grows with country shift: tokens learned on US remove 1,300 India FPs per fold.
+- On test it removes US 1,840, India 2,826 and France 1.
+- Test removals carry the planted house-number signature: first-number agreement is US 0.07–0.13 and India 0.25–0.31. Eval planted pairs are 0.014 (US) and 0.212 (India); all kept pairs are 0.878 and 0.766. That puts about 90% of removals as planted (break-even ~25%).
+- amazonml-99 reaches the same figure with the US-format parser: 0.131 vs 0.850 (US) and 0.200 vs 0.824 (India).
+
+Expected Δ public LB, Monte Carlo per S1, weights 0.43 / 0.43 / 0.146:
+
+| planted share | 0.75 | 0.9 | 1.0 |
+|---|---|---|---|
+| ΔLB | +0.00046 | +0.00062 | +0.00072 |
+
+amazonml-99 packages this as `sub08_xd_s2lab_all_veto`, built from `output_variants/xd_s2lab_all_guard_veto` (sha 6e0b948bc083).
+
+**lfveto rejected.**
+- France has an unmistakable planted-affiliate family: `participations`, `international`, `holding`, `distribution`, `developpement`, `groupe`, `france`, `snc`.
+  - Each appears on the target side alone 10–16k times (snc 3.8k).
+  - Each appears on the S1 side about 0 times.
+- The model rejects the first four (keep 0.1%) but keeps 9–12% of groupe/developpement/france/snc (4,478 pairs).
+- A label-free discovery rule rediscovers exactly the train-labelled planted tokens in-country and wins big in LOCO. The rule: a token appears alone on the target side ≥ 2 per 1000 S1, is one-sided (B/A ≤ 0.25), has keep rate ≤ 0.3 and median p ≤ 0.5.
+- But a token can be planted *and* appended by noise.
+  - US `partners` is 11.6% true, and the in-country model keeps 754 of 761 true ones.
+  - House-number agreement separates the two classes. Planted look-alikes shift the number (US eval 0.014); true copies keep it (US `partners` true 0.86).
+- France kept +groupe/+developpement/+france pairs have first-number agreement **0.95–0.96**, against 0.014–0.016 for the rejected ones. They are true suffix-noise copies, and the model's 9–12% is it correctly finding them.
+- Only `snc` (kept 324, agreement 0.08) looks planted.
+- The LOCO win came from a world where the planted and noise vocabularies don't overlap. (Caught by amazonml-99.)
+
+**frhn not supported, so sub07 (veto+frhn) is withdrawn as a candidate.**
+- The "France true copies change the number 0.39% (p ≥ 0.999) vs 1.27% kept" argument is selection bias.
+  - US **true** pairs show the same enrichment: 8.9% at p ≥ 0.999 vs 27.6% for kept < 0.999.
+  - France's same-street/different-number rate falls monotonically with p: 17.1% (≤0.8) → 0.13% (>0.9999) (amazonml-99).
+- A near-pure sample of true France copies (kept +groupe/+developpement/+france) trips frhn at **2.7%**, against 1.2% for all kept France pairs. The 9,140 frhn pairs show no planted enrichment.
+- 2,341 of them have target house number "1". That is 0.27% of France kept pairs, the same as US **true** target-"1" pairs (0.28%, 1 FP of 1,223 kept).
+- In US train, kept same-street/different-number pairs are 99% true in every digit-pattern class (amazonml-99).
+
+**France house-number mechanism, label-free facts (for any later France-specific feature):**
+- France noise rarely truncates or pads numbers: trunc/pad candidates 6.2 per 1000 S1 against US 52, relative to same-number pairs.
+- France planted look-alikes shift the number: rejected planted-token pairs agree 1.4–2.4%.
+- Many France "first number differs" pairs are only reordered multi-part addresses (`apt 16`, `cs 41195`, postcodes, `14 cour remery 290b rue …`). Any France house-number rule needs a street-anchored parser.
+- Generic house-number features trained on US/India keep the wrong sign for France (OpenCode, and the hn_all row above).
+
+**Also this session, from OpenCode (not committed by it):**
+- E-AB1 entity abstention (`abstain_lab.py`): the best rule selected on fold 3, t_margin ≤ 0.1, gives +0.00001 on eval. Null.
+- E-SC1 sibling-conflict features (`sibconf.py`, s2lab_all_sc): eval 0.98737 vs 0.98742, tune 0.98766 vs 0.98783. Null.
