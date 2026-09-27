@@ -1,0 +1,63 @@
+{
+  "submission_id": "sub04_xd_dense_mix",
+  "purpose": "upload #2 candidate: single-factor test of the density/orphan hypothesis vs upload #1 (same candidates, same features)",
+  "upload_file": "output/matching_results.tsv",
+  "files": {
+    "output/matching_results.tsv": {
+      "sha256": "4b4b064ccc1b2a57299161396930fa8028191921068ed5ecd718700eb5925933",
+      "data_rows": 1732544,
+      "matched_pairs": 5849442
+    },
+    "output/candidate_pairs.tsv": {
+      "sha256": "23caf70a1767123e3b01c8b136436aa0f8bd677561266aa55ec5dfea2eb70a54",
+      "data_rows": 1732544,
+      "candidate_pairs": 9585603,
+      "candidates_per_s1": 5.533
+    }
+  },
+  "copied_from": "output_variants/xd_dense_mix (byte-identical, cmp)",
+  "approach": "xd candidates + stage2_lab `all` features, stage 2 retrained on normal + dense-world rows (density_train --mix: 19% of train S1 dropped, their copies become orphans, context recomputed), early stopping on the dense tune fold; thr+excl \u03c4 0.68 (dense tune)",
+  "local_validation": {
+    "normal_tune": 0.98768,
+    "normal_eval_fold0": 0.98743,
+    "dense_tune": 0.98634,
+    "dense_eval_fold0_at_normal_tau": 0.98625,
+    "density_loss": -0.0012,
+    "normal_fp": 2162,
+    "dense_fp": 2542
+  },
+  "candidate_generation": {
+    "retrieval_views_K": {
+      "name_char3_tfidf": 5,
+      "addr_word_tfidf": 5,
+      "combo": 10,
+      "reverse_combo_target_to_S1": 8,
+      "xs_reverse": "rank<2 (non-Latin-script targets)",
+      "dn_reverse_e5": "rank<1 (non-Latin-script targets)"
+    },
+    "tfidf": {
+      "fit_sample": 2000000,
+      "name_max_df": 0.05,
+      "addr_max_df": 0.05
+    },
+    "merge_command": "xscript.py merge --views xs,dn --cap xs=2,dn=1",
+    "learned_filter": "stage-1 p1 >= 1e-3 (stage2_lab PRUNE); candidate_pairs.tsv = exactly the pairs stage 2 scores",
+    "test_retrieval_pairs": 86400750,
+    "test_retrieval_per_s1": 49.87,
+    "test_final_candidates_per_s1": 5.533
+  },
+  "git": {
+    "code": "45809ee density_train.py (+ ba0cbed predict), redecode.py caa8780",
+    "reproduce_from": "2ac7819 or later"
+  },
+  "reproduce": [
+    "see sub03p_xd_s2lab_all/metadata.json steps 1-8 (work_xd s2lab parts)",
+    "BER_WORK_DIR=../../work_xd python src/experiments/density_train.py build --stage1-tag _xd --stage1-extra dn_cos --extra featx,featdn",
+    "BER_WORK_DIR=../../work_xd python src/experiments/density_train.py evaluate --ref s2lab_all --mix",
+    "BER_WORK_DIR=../../work_xd python src/experiments/density_train.py predict --name dense_mix --world dense --out <dir>"
+  ],
+  "leaderboard": {
+    "public_f05": null,
+    "uploaded_at": null
+  }
+}

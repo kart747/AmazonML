@@ -1,0 +1,58 @@
+{
+  "submission_id": "sub05probe_xd_dense_mix_frblank",
+  "purpose": "diagnostic: absolute France F0.5 on the public LB",
+  "upload_file": "output/matching_results.tsv",
+  "files": {
+    "output/matching_results.tsv": {
+      "sha256": "1e9fc443ca89a9b8a8cc5e0bf6f0ba11458659d833efaa60e5ad3727db1b1da7",
+      "data_rows": 1732544,
+      "matched_pairs": 4972852
+    },
+    "output/candidate_pairs.tsv": {
+      "sha256": "23caf70a1767123e3b01c8b136436aa0f8bd677561266aa55ec5dfea2eb70a54",
+      "data_rows": 1732544,
+      "candidate_pairs": 9585603,
+      "candidates_per_s1": 5.533
+    }
+  },
+  "copied_from": "output_variants/xd_dense_mix_frblank (byte-identical, cmp)",
+  "approach": "PROBE, not a candidate: sub04 with every France S1 emptied (France tau 1.01). US/India rows byte-identical to sub04",
+  "local_validation": {
+    "note": "France-blank probe; LB(sub04) - LB(this) = w_FR * (F_FR - s_FR)"
+  },
+  "candidate_generation": {
+    "retrieval_views_K": {
+      "name_char3_tfidf": 5,
+      "addr_word_tfidf": 5,
+      "combo": 10,
+      "reverse_combo_target_to_S1": 8,
+      "xs_reverse": "rank<2 (non-Latin-script targets)",
+      "dn_reverse_e5": "rank<1 (non-Latin-script targets)"
+    },
+    "tfidf": {
+      "fit_sample": 2000000,
+      "name_max_df": 0.05,
+      "addr_max_df": 0.05
+    },
+    "merge_command": "xscript.py merge --views xs,dn --cap xs=2,dn=1",
+    "learned_filter": "stage-1 p1 >= 1e-3 (stage2_lab PRUNE); candidate_pairs.tsv = exactly the pairs stage 2 scores",
+    "test_retrieval_pairs": 86400750,
+    "test_retrieval_per_s1": 49.87,
+    "test_final_candidates_per_s1": 5.533
+  },
+  "git": {
+    "code": "45809ee density_train.py (+ ba0cbed predict), redecode.py caa8780",
+    "reproduce_from": "2ac7819 or later"
+  },
+  "reproduce": [
+    "see sub03p_xd_s2lab_all/metadata.json steps 1-8 (work_xd s2lab parts)",
+    "BER_WORK_DIR=../../work_xd python src/experiments/density_train.py build --stage1-tag _xd --stage1-extra dn_cos --extra featx,featdn",
+    "BER_WORK_DIR=../../work_xd python src/experiments/density_train.py evaluate --ref s2lab_all --mix",
+    "BER_WORK_DIR=../../work_xd python src/experiments/density_train.py predict --name dense_mix --world dense --out <dir>",
+    "BER_WORK_DIR=../../work_xd python src/experiments/redecode.py write --name s2lab_dense_mix --tau 0.68 --country-tau France=1.01 --out <dir>"
+  ],
+  "leaderboard": {
+    "public_f05": null,
+    "uploaded_at": null
+  }
+}

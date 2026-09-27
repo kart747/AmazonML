@@ -1,0 +1,8 @@
+{
+  "model": "s2lab_dense_mix",
+  "tau_world": "dense",
+  "variant": "threshold+excl",
+  "tau": 0.68,
+  "tune_f05": 0.98634,
+  "matched_pairs": 5849442
+}
