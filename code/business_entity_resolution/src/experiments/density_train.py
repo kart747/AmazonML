@@ -41,7 +41,7 @@ from ber.metric import Evaluator  # noqa: E402
 from ber.utils import done, log, mark_done, save_json, stage  # noqa: E402
 from density import dense_context  # noqa: E402
 
-DENSE = "s2lab_dense"
+DENSE = os.environ.get("BER_S2LAB_DENSE", "s2lab_dense")   # e.g. s2lab_dense_adf
 
 
 def dropped_s1(frac):
