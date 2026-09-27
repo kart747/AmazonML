@@ -292,3 +292,8 @@ Tune shows +0.00004, which is noise, so **dn_cos is dropped**. The e5 embedding 
 | **s2lab all, xd candidates** | **0.98783** | **0.98742** | 0.99665 | 0.97018 | 0.97038 | 2,328 | 0.99045 | 0.95019 | 3.373 |
 
 **Result: +0.0020 tune / +0.0019 eval, fully additive with E-M3.** Recall rises 0.53 pt, and FP rises by 186 pairs. The density check (`src/experiments/s2lab_density_tagged.py`, which uses stage2_lab.density with the A2_xd stage 1) is running; the ship gate is a drop no larger than s2lab all's. Test side: India test gains 1.02M candidate pairs (1.26/S1, against 0.97/S1 on train), merge 7.5 GB, India test features 11.1 GB. The prediction goes to output_variants/xd_s2lab_all.
+
+### E-M5. Stage-2 hyperparameters, and 5d's xd candidates under s2lab (cross-reference)
+- `s2lab_all_hp1` (lr 0.04, 255 leaves, min_data 100, feature_fraction 0.7): tune 0.98583 (+0.00004 vs s2lab_all), eval 0.98562, FP 1,848, 1,133 iterations. Below the gate, **not adopted**. Stage-2 hyperparameters are saturated.
+- 5d's port (E-X*): s2lab `all --drop dn_cos` on work_xd candidates (base ∪ xs<2 ∪ dn<1 for India, stage 1 A2_xd): tune **0.98783** / eval **0.98742** (+0.0020 / +0.0019 vs s2lab_all). Density (same protocol, tag-aware stage 1): dense tune 0.98515 (vs 0.98315), dense eval at normal τ 0.98498, loss −0.0024. **Passes both gates → submission 3 candidate** (5d owns the test file and the SUBMISSIONS row).
+- Reserve folds 4–9 (chain_f49): block started 07:42. Measured on base candidates first.
