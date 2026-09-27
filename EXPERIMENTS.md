@@ -273,3 +273,22 @@ Stage-1 validation logloss 0.00769 → **0.00513 / 0.00507** (fold A / B, −34%
 | s2lab_all_s1fx | 0.98594 | 0.98579 | 2,053 | 0.98337 | 0.98351 | 3.37 |
 
 Δ tune +0.00015 and Δ dense tune +0.0002, both below the +0.001 gate. **Not adopted.** The test file is kept as a validated backup (`output_variants/s2lab_all_s1fx/`, PASS). Runtime ~80 min: stage-1 fits 7–8 min each at 8 threads (6.2 GB); feat2 train+test is the bulk.
+
+## E-X2. Cross-script candidates on the stage-2 lab pipeline, plus the dn_cos ablation (parallel track)
+**dn_cos ablation** on the base candidates: 5e's s2lab `all` (E-M3) with dn_cos added (`--variant all --tag _dn`, no --drop, 93 features):
+
+| fold 3 / fold 0 | tune F0.5 | eval F0.5 | eval P | eval R | FP |
+|---|---|---|---|---|---|
+| s2lab all (−dn_cos) | 0.98579 | 0.98550 | 0.99686 | 0.96487 | 2,142 |
+| s2lab all + dn_cos | 0.98583 | 0.98570 | 0.99699 | 0.96495 | 2,070 |
+
+Tune shows +0.00004, which is noise, so **dn_cos is dropped**. The e5 embedding covers only non-Latin India targets, and featx's n_map_* features already score those.
+
+**Port.** The work_xd candidates (base ∪ xs<2 ∪ dn<1 for India, E-X1) run through the whole stage-2 lab pipeline: stage 1 = A2_xd; featx recomputed in work_xd (US parts symlinked, 11 min, 11.6 GB peak); `stage2_lab build --extra featx` (2 min, 6.6 GB); `evaluate --variant all --drop dn_cos` (2.5 min, 8 threads). Same folds, same 92 features:
+
+| | tune F0.5 | eval F0.5 | eval P | eval R | pair R | FP | singleton acc | F0.5 (1 true) | pairs/S1 |
+|---|---|---|---|---|---|---|---|---|---|
+| s2lab all, base candidates | 0.98579 | 0.98550 | 0.99686 | 0.96487 | 0.96528 | 2,142 | 0.99078 | 0.94498 | 3.354 |
+| **s2lab all, xd candidates** | **0.98783** | **0.98742** | 0.99665 | 0.97018 | 0.97038 | 2,328 | 0.99045 | 0.95019 | 3.373 |
+
+**Result: +0.0020 tune / +0.0019 eval, fully additive with E-M3.** Recall rises 0.53 pt, and FP rises by 186 pairs. The density check (`src/experiments/s2lab_density_tagged.py`, which uses stage2_lab.density with the A2_xd stage 1) is running; the ship gate is a drop no larger than s2lab all's. Test side: India test gains 1.02M candidate pairs (1.26/S1, against 0.97/S1 on train), merge 7.5 GB, India test features 11.1 GB. The prediction goes to output_variants/xd_s2lab_all.
