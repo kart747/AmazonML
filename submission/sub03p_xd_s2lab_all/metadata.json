@@ -89,7 +89,9 @@
     "BER_WORK_DIR=../../work_xd python src/experiments/redecode.py pruned --name s2lab_all --out <dir>"
   ],
   "leaderboard": {
-    "public_f05": null,
-    "uploaded_at": null
+    "public_f05": 0.97741,
+    "uploaded_at": "2026-09-27 08:42 IST",
+    "upload_no": 1,
+    "local_to_lb": -0.01001
   }
 }

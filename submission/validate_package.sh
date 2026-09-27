@@ -22,7 +22,7 @@ sha256sum -c SHA256SUMS
   set -e
   echo
   echo "# hard check: matched ids subset of candidates (redecode.py check)"
-  $R/.venv/bin/python $R/code/business_entity_resolution/src/experiments/redecode.py check --out "$P" 2>&1 | grep -v Deprecation | grep -v "^  "
+  $R/.venv/bin/python $R/code/business_entity_resolution/src/experiments/redecode.py check --out "$P/output" 2>&1 | grep -v Deprecation | grep -v "^  "
   echo "# sha256 after validation"
   sha256sum output/matching_results.tsv output/candidate_pairs.tsv
 } > validation.txt 2>&1
