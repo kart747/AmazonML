@@ -411,3 +411,8 @@ Rejected: an **affiliate guard** (drop kept pairs whose target adds an affiliate
 Per region, test US equals the train world with half the S1 entities deleted **together with their true copies**, while the orphans stay: 1.22 / 0.5 = 2.44 orphans per S1, matching test's ~2.3. The 19% sim instead keeps a 0.81×-dense S1 pool.
 - Build: US drops 50% of S1 and deletes their 2.29M true targets. India drops 19% and orphanizes them (India's orphan density cannot be reached by deletion).
 - It recomputes the reverse context, name frequencies, forward ranks r_name/r_addr/r_combo, and q_rank/q_gap/q_ncand after the deletions, followed by stage 1 → stage 2 features.
+
+**E-X7 addendum: dense_mix + France pseudo-labels** (`pseudo_label.py apply --ref s2lab_dense_mix --mix-dense`): dense_mix labels France test pairs (832,912 pos / 622,268 neg / 156,165 dropped). Stage 2 is trained on normal + dense folds 1,2 + France pseudo rows (5.40M rows), with early stopping on the dense tune fold and τ 0.71 on the normal tune fold.
+Normal: tune 0.98759, **eval 0.98743**, FP 2,042. Dense eval @ τ: **0.98632** (dense_mix 0.98625). Test pred/S1: France 3.396 (dense_mix 3.379, upload #1 3.403), India 3.363, US 3.382. File: `output_variants/xd_dense_mix_plfr` (5,847,281 matches, subset check 0). Held back until upload #2 (dense_mix) and #3 (France-blank probe) show where the LB gap sits.
+
+**Upload queue (agreed with amazonml-27):** U2 = `submission/sub04_xd_dense_mix` (validator PASS, locked, sha 4b4b064ccc1b). U3 = `submission/sub05probe_xd_dense_mix_frblank` (France emptied; US/India byte-identical to U2), so LB(U2) − LB(U3) = w_FR · (F_FR − s_FR).
