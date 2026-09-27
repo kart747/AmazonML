@@ -526,3 +526,28 @@ The per-split rate makes train vs test perfectly separable but does not drive er
 
 **To run (heavy: full LightGBM fit on 3.94M rows plus 4 scoring passes, ~3.3 GB RSS seen before it was stopped; not rerun):**
 `BER_WORK_DIR=../../work_xd BER_THREADS=8 python src/experiments/hard_negative_s2.py evaluate --mix --weight 2 --mine-tau 0.68 --tag _w2` (the OOF file `reports/hn_oof_mix.parquet` already exists).
+
+## E-X11. French legal forms: canonicalize, strip, or leave alone? (label-free on France test + US/India train labels; light queries only)
+
+Prompted by amazonml-27's LOCO finding: unseen-country misses are obvious matches with legal-form or abbreviation variants the source country never shows.
+- **France test, scored pairs (work_xd `test_s2lab_all_pairs`):** the legal-form token set differs in 27.1% of pairs at p ≥ 0.99, 49.1% at 0.3–0.99, and 52.3% at 0.05–0.3. It is overwhelmingly present-vs-absent (`sarl`↔∅, `sas`↔∅, and so on), not variant spellings.
+- **Target-only tokens** (target/S1 frequency ratio ÷ base ratio 5.53):
+  - `participations` 3099, `snc` 1481, `dba` 899, `formerly` 399, `holding` 341, `et` 153, `distribution` 95, `aka` 92, `associes` 74, `international` 31.
+  - US analogues: `incorporated` 1182, `lnc` 623, the dba/aka/fka family, and branch words (`midtown`, `northside`, …).
+  - India analogues: misspellings `praivet`, `limitet`, …
+- **Label analogue (s2lab train pairs whose names are equal once legal-form tokens are removed):**
+
+| legal forms | US true rate (n) | India true rate (n) |
+|---|---|---|
+| same | 0.935 (691k) | 0.921 (316k) |
+| on one side only | 0.731 (406k) | 0.745 (90k) |
+| different | **0.356** (75k) | 0.819 (197k; pvt/private, ltd/limited spelling noise) |
+
+  Mean stage-1 p1 tracks these rates almost exactly, so the model already reads the legal form.
+- **Decision:** do **not** strip French legal forms. `sarl`↔`sas` is the US `llc`↔`inc` case, where a different form is evidence of a different entity. Only true aliases are safe to merge. The ones present in France test pairs:
+  - `compagnie`↔`cie`: 1,903 pairs, mean p 0.80, 20.5% below τ 0.68.
+  - `et`↔`and`: 3,209 pairs, already mapped in E-G1.
+  - `etablissements`↔`ets`: 49 pairs, mean p 0.16.
+  - Long legal-form phrases (société à responsabilité limitée, …): 0 occurrences.
+- **Upper bound for the alias fix:** 390 below-τ pairs, i.e. ≤ +0.0015 France F0.5, ≈ +0.0002 LB. Implemented as opt-in `fr_renorm.py setup --legal-alias` (compagnie→cie, etablissements→ets; default = E-G1 behaviour, unit-tested). **Not built or scored**: that needs the France feature rebuild in work_fr, which is paused under the no-heavy-runs rule.
+- **Open question (not acted on):** do the target-only `holding`/`participations`/`distribution`/`international` names mark affiliates (negatives) or noise on true matches? In US train, the branch-word class (`midtown` etc.) is the natural label analogue.

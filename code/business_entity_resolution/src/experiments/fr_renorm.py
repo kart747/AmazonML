@@ -10,7 +10,11 @@ also join with "et" where the normalizer maps "&" to "and".
 Fix (France rows only; US/India and every train artifact are untouched):
   address: each comma segment that is a region or one of its departments -> one region
            code token (hdf / naq / pdl), mirroring the US/India state codes.
-  name:    token "et" -> "and".
+  name:    token "et" -> "and"; with --legal-alias also "compagnie" -> "cie" and
+           "etablissements" -> "ets" (E-X11: the only legal-form aliases that swap inside
+           France test pairs; legal forms themselves are NOT stripped, because in US train
+           a different legal form on an otherwise equal name is 36% true vs 93% for the same
+           form, so the form is evidence, not noise).
 Candidates (rid, gid) are NOT re-blocked: blocking already uses max_df 0.05, which drops
 these frequent tokens, and keeping the rows keeps featdn/dn_cos aligned. Only the
 features that read nm/ad are rebuilt for France: feat, featx, feat2 (stage-1), s2lab.
@@ -53,16 +57,21 @@ def norm_addr_fr(raw: str) -> str:
     return " ".join(x for x in out if x)
 
 
-def norm_name_fr(raw: str) -> str:
-    return " ".join("and" if t == "et" else t for t in norm_name(raw).split())
+NAME_TOKENS = {"et": "and"}
+LEGAL_ALIAS = {"compagnie": "cie", "etablissements": "ets"}
 
 
-def _renorm(df: pl.DataFrame) -> pl.DataFrame:
+def norm_name_fr(raw: str, legal_alias: bool = False) -> str:
+    m = {**NAME_TOKENS, **LEGAL_ALIAS} if legal_alias else NAME_TOKENS
+    return " ".join(m.get(t, t) for t in norm_name(raw).split())
+
+
+def _renorm(df: pl.DataFrame, legal_alias: bool = False) -> pl.DataFrame:
     fr = pl.col("country") == "France"
     sub = df.filter(fr)
     names = sub.get_column("name").unique().to_list()
     addrs = sub.get_column("addr").unique().to_list()
-    nmap = pl.DataFrame({"name": names, "_nm": [norm_name_fr(x or "") for x in names]})
+    nmap = pl.DataFrame({"name": names, "_nm": [norm_name_fr(x or "", legal_alias) for x in names]})
     amap = pl.DataFrame({"addr": addrs, "_ad": [norm_addr_fr(x or "") for x in addrs]})
     df = df.join(nmap, on="name", how="left", maintain_order="left").join(amap, on="addr", how="left", maintain_order="left")
     return df.with_columns(nm=pl.when(fr).then(pl.col("_nm")).otherwise(pl.col("nm")),
@@ -83,7 +92,7 @@ def _link_parts(src_dir: Path, dst_dir: Path, skip_prefix="France"):
             _link(f, dst_dir / f.name)
 
 
-def setup(src: Path, dst: Path):
+def setup(src: Path, dst: Path, legal_alias: bool = False):
     if dst.exists():
         raise SystemExit(f"{dst} exists; refusing to overwrite")
     (dst / "prep").mkdir(parents=True)
@@ -92,7 +101,7 @@ def setup(src: Path, dst: Path):
             continue
         _link(f, dst / "prep" / f.name)
     for name in ("s1_test", "tg_test"):
-        df = _renorm(pl.read_parquet(src / "prep" / f"{name}.parquet"))
+        df = _renorm(pl.read_parquet(src / "prep" / f"{name}.parquet"), legal_alias)
         df.write_parquet(dst / "prep" / f"{name}.parquet")
         (dst / "prep" / f"{name}.parquet.done").touch()
         log(f"{name}: France rows re-normalized")
@@ -139,9 +148,10 @@ def main():
     ap.add_argument("--dst", default="../../work_fr")
     ap.add_argument("--a", default="../../work_xd")
     ap.add_argument("--b", default="../../work_fr")
+    ap.add_argument("--legal-alias", action="store_true", help="also map compagnie->cie, etablissements->ets")
     a = ap.parse_args()
     if a.cmd == "setup":
-        setup(Path(a.src), Path(a.dst))
+        setup(Path(a.src), Path(a.dst), a.legal_alias)
     else:
         compare(Path(a.a), Path(a.b))
 
