@@ -724,3 +724,16 @@ amazonml-99 packages this as `sub08_xd_s2lab_all_veto`, built from `output_varia
 | (E-X10 with negatives, lo 0.05) | 0.92142 | 0.92979 | 0.93072 | 0.93130 |
 
   Without target-country negatives the model over-matches the new country, and each round feeds its own false positives back in. The pseudo-negatives anchor the target distribution despite their 4.5–8.5% error. So the lower-negative variant (`--lo 0.01`, chain_x11) goes the wrong way and was not run. The one-round France application with negatives (`s2lab_all_plfr`, E-X7, output_variants/xd_s2lab_all_plfr) stays the only self-training candidate.
+- **France pseudo-labelled decisions (E-X7 `s2lab_all_plfr`) graded label-free → candidate sub09.**
+  - `lb_guards.py write --rules veto --france-from s2lab_all_plfr` keeps upload #1 for US/India, takes plfr's France keep, then applies the veto. Only 13,666 France S1 rows differ from sub08.
+  - Pairs plfr **adds** in France (10,168, median p 0.55 → 0.91) keep the first house number 95.2%. The kept-by-both baseline is 98.5% and planted look-alikes 1.4–2.4%. They are mostly one-word swaps, acronyms and suffix noise at the same address. In US/India train, one-for-one word swaps at the same first number are 91–96% true (US 46k, India 41k pairs).
+  - Pairs plfr **drops** (4,062) keep the number 48.6%, so they are half planted-like.
+  - The plfr model's US/India changes on test (US +4.6k/−6.7k, India +7.7k/−10.1k) are excluded. They are neutral on eval, but both directions carry the planted signature (added pairs agree 0.28/0.37).
+  - Monte Carlo France ΔF (added-true / dropped-FP):
+
+| added-true / dropped-FP | 0.97/0.52 | 0.9/0.5 | 0.8/0.5 | 0.7/0.4 | 0.6/0.3 |
+|---|---|---|---|---|---|
+| France ΔF | +0.0051 | +0.0040 | +0.0027 | +0.0006 | −0.0014 |
+| ΔLB (×0.146) | +0.00075 | +0.00059 | +0.00039 | +0.00009 | −0.0002 |
+
+  - Package: `submission/sub09_xd_s2lab_all_veto_frplfr` (sha f2d30683e1c2, validator PASS, locked).

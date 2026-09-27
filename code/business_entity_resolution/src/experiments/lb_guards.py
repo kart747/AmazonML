@@ -146,13 +146,21 @@ def evaluate(name, min_n, max_true):
     save_json(out, W / "reports" / f"lb_guards_{name}.json")
 
 
-def write(name, rules, out, min_n, max_true, veto_src):
+def write(name, rules, out, min_n, max_true, veto_src, france_from=None):
     W = config.WORK_DIR
     pairs = pl.read_parquet(W / "reports" / f"test_{name}_pairs.parquet", columns=["rid", "gid", "p", "keep"])
     keep0 = pairs.get_column("keep").to_numpy()
     d = attach(pairs, "test")
+    if france_from:
+        # France decisions from another model scored on the SAME pair list (e.g. s2lab_all_plfr, E-X7);
+        # US/India keep this model's decisions, so the change vs `name` is France-only.
+        alt = pl.read_parquet(W / "reports" / f"test_{france_from}_pairs.parquet", columns=["rid", "gid", "keep"])
+        assert alt.select("rid", "gid").equals(pairs.select("rid", "gid")), "pair lists differ"
+        fr = (d.get_column("country") == "France").fill_null(False).to_numpy()
+        keep0 = np.where(fr, alt.get_column("keep").to_numpy(), keep0)
     drop = np.zeros(len(keep0), bool)
-    dec = {"source_scores": f"test_{name}_pairs.parquet", "base": "saved keep of those scores", "rules": rules, "veto_src": veto_src}
+    dec = {"source_scores": f"test_{name}_pairs.parquet", "base": "saved keep of those scores", "rules": rules, "veto_src": veto_src,
+           "france_from": f"test_{france_from}_pairs.parquet" if france_from else None}
     if "veto" in rules:
         sc = pl.read_parquet(W / "reports" / f"scores_{veto_src}.parquet").filter(pl.col("fold") == config.TUNE_FOLD)
         toks = learn_veto(attach(sc, "train"), min_n, max_true).get_column("tok").to_list()
@@ -190,6 +198,7 @@ def main():
     ap.add_argument("--min-n", type=int, default=50)
     ap.add_argument("--max-true", type=float, default=0.02)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--france-from", default=None, help="write: take France decisions from test_<name>_pairs.parquet")
     ap.add_argument("--veto-src", default="s2lab_all", help="write: tune-fold scores the veto tokens are learned from "
                     "(a property of the data generator, not of the model; dense_mix has no saved tune scores)")
     a = ap.parse_args()
@@ -197,7 +206,7 @@ def main():
         evaluate(a.name, a.min_n, a.max_true)
         return
     assert a.out, "write needs --out"
-    sys.exit(write(a.name, a.rules.split(","), a.out, a.min_n, a.max_true, a.veto_src))
+    sys.exit(write(a.name, a.rules.split(","), a.out, a.min_n, a.max_true, a.veto_src, a.france_from))
 
 
 if __name__ == "__main__":
