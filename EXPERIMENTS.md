@@ -298,3 +298,36 @@ Tune shows +0.00004, which is noise, so **dn_cos is dropped**. The e5 embedding 
 - 5d's port (E-X*): s2lab `all --drop dn_cos` on work_xd candidates (base ∪ xs<2 ∪ dn<1 for India, stage 1 A2_xd): tune **0.98783** / eval **0.98742** (+0.0020 / +0.0019 vs s2lab_all). Density (same protocol, tag-aware stage 1): dense tune 0.98515 (vs 0.98315), dense eval at normal τ 0.98498, loss −0.0024. **Passes both gates → submission 3 candidate** (5d owns the test file and the SUBMISSIONS row).
 - Reserve folds 4–9 (chain_f49): block started 07:42. Measured on base candidates first.
 - **Blend lab** (`blend_lab.py`, mean of saved scores, missing pair = 0, τ and weights chosen on tune): best blend all + all_s1fx + all_dn scores tune 0.98615 / eval 0.98595. That is +0.00021 tune over the best single model (all_s1fx 0.98594) and +0.00036 over s2lab_all. The five stage-2 models are too correlated; below the gate, **not adopted**.
+
+## E-X3. Candidate-set size, remaining retrieval misses, and the train→test gap (parallel track)
+**Candidate-set size.** The organisers' update says smaller candidate sets per S1 rank higher (SUBMISSION_REQUIREMENTS.md l.11, l.107). Eval fold 0, xd candidates, 765,153 true pairs:
+
+| candidate set | per S1 | pair recall | true pairs lost |
+|---|---|---|---|
+| retrieval (all views) | 41.55 | 0.98787 | 0 |
+| rank caps name<3 addr<3 combo<8 rev<8 | 39.57 | 0.98764 | 174 |
+| rank caps name<5 addr<5 combo<10 **rev<4** | 24.28 | 0.98561 | 1,727 |
+| top-10 by stage-1 p1 per S1 | 10.00 | 0.98775 | 92 |
+| **stage-1 p1 ≥ 1e-3 (what stage 2 already scores)** | **4.77** | **0.98779** | **61** |
+| stage-1 p1 ≥ 1e-2 | 4.02 | 0.98696 | 700 |
+
+Rank caps lose recall quickly, because reverse-view ranks carry the rare true pairs. The stage-1 learned filter keeps recall at ~1/9 of the size. **Adopted for shipping:** `candidate_pairs.tsv` = the pairs stage 2 scores (test 5.53/S1: US 5.31, India 5.50, France 6.21) instead of 49.9/S1. The matches are identical. `redecode.py pruned` builds it, and `redecode.py check` is a hard matched ⊆ candidates check, whereas the official validator only warns. The pipeline is disclosed in Documentation §3.
+
+**Remaining retrieval misses** (fold 0, after xs/dn): India 4,534 pairs (62% empty target address, 10% non-Latin), US 4,746 (90% empty address; 2,886 have name ≥ 90 and address < 50). Only ~650 pairs are "coined name at the same address" (name < 50, address ≥ 80), and that is also the planted-distractor pattern. **Retrieval is saturated for decidable pairs.** No further views were built.
+
+**Train→test gap evidence (no LB scores of ours yet).**
+- A public repo with a pipeline like ours (harshgitty58/Amazon_ML_Challenge, two-stage + siblings) reports val 0.9842 → public LB 0.969. Their earlier model went 0.9743 → 0.967, so +0.010 val gave +0.002 LB. Their country-blanking probes (France 0.836, India 0.580, US 0.578) imply public-LB weights of about US 43% / India 43% / France 15%. Swapping France predictions changed nothing. Public top on 09-26: 0.9906.
+- Ours, label-free: we match 58.8% of test targets against ~74% true in train. Test pred/S1 is +0.046, against +0.012 in the density simulation.
+- Stage-2 score mass per S1 by p bin (xd + s2lab_all):
+
+| | <0.01 | 0.01–0.05 | 0.05–0.2 | 0.2–0.5 | 0.5–0.68 | 0.68–0.8 | 0.8–0.95 | 0.95–0.99 | >0.99 |
+|---|---|---|---|---|---|---|---|---|---|
+| eval India | 1.096 | 0.195 | 0.100 | 0.072 | 0.024 | 0.016 | 0.051 | 0.097 | 3.211 |
+| test India | 1.565 | 0.281 | 0.151 | 0.095 | 0.030 | 0.022 | 0.062 | 0.108 | 3.181 |
+| eval US | 0.926 | 0.167 | 0.127 | 0.093 | 0.023 | 0.014 | 0.038 | 0.071 | 3.249 |
+| test US | 1.331 | 0.290 | 0.172 | 0.102 | 0.029 | 0.018 | 0.044 | 0.082 | 3.245 |
+| test France | 1.951 | 0.389 | 0.257 | 0.149 | 0.052 | 0.041 | 0.110 | 0.149 | 3.112 |
+| eval precision in bin | 0.002 | 0.025 | 0.116 | 0.327 | 0.569 | 0.748 | 0.898 | 0.978 | 0.9997 |
+
+The confident mass (> 0.99) is unchanged, and the mid-range grows by 10–30% (France about 2×). With eval calibration this would add only ~0.003 FP/S1. So an LB drop of the size above would mean calibration itself breaks on test, most likely on orphan copies of absent S1 entities (hypothesis H1). Thresholds cannot fix that: τ 0.55 → 0.80 moves only 1.3% of test pairs. The fix is density-trained stage 2 (`density_train.py`, queued).
+- LB direction probes, all on sub-3 scores with pruned candidates and subset-checked: `output_variants/xd_s2lab_all_tau080` (3.36/S1), `_tau055` (3.40/S1), `_fr090` (France τ 0.90; 5,837,458 matches). Decisions rest on tune + density, not on public-LB deltas.
