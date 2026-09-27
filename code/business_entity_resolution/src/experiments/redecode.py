@@ -11,9 +11,15 @@ detect shift. France has no labels, so its decision can only be checked label-fr
             -> reports/test_diagnostics_A<n><tag>.json + printed table
   write     apply a decision rule and write a complete submission to --out, then run the
             official validator. The rule is recorded in <out>/decision.json.
+  pruned    same matches as the saved decision (the `keep` column), but candidate_pairs.tsv =
+            only the pairs the final (stage-2) model actually scored, e.g. the stage2_lab set
+            after the stage-1 p1 >= 1e-3 filter (~5.5/S1 on test instead of ~50/S1).
+            The organisers rank smaller candidate sets per S1 higher; the rules define the
+            candidate set as "whatever your model actually runs inference over".
 
 Usage:
   python src/experiments/redecode.py diagnose --approach 2
+  BER_WORK_DIR=../work_xd python src/experiments/redecode.py pruned --name s2lab_all --out output_variants/xd_s2lab_all_pruned
   python src/experiments/redecode.py write --approach 2 --variant threshold+excl --tau 0.80 \
          --country-tau France=0.85 --out output_variants/a2_fr085
 Cost: ~1–2 min, ~3 GB RAM for the full test set.
@@ -126,9 +132,26 @@ def write(approach, variant, tau, country_tau, out):
     return rc
 
 
+def pruned(name, out):
+    """Rewrite a submission with candidate_pairs = the pairs the final model scored (keep unchanged)."""
+    W = config.WORK_DIR
+    pairs = pl.read_parquet(W / "reports" / f"test_{name}_pairs.parquet", columns=["rid", "gid", "keep"])
+    keep = pairs.get_column("keep").to_numpy()
+    config.OUT_DIR = Path(out).resolve()
+    write_submission(pairs.select("rid", "gid"), keep)
+    n1 = pl.read_parquet(W / "prep" / "s1_test.parquet", columns=["rid"]).height
+    dec = {"source_scores": f"test_{name}_pairs.parquet", "candidates": "pairs scored by the final model",
+           "candidate_pairs": pairs.height, "candidates_per_s1": round(pairs.height / n1, 3),
+           "matched_pairs": int(keep.sum())}
+    save_json(dec, config.OUT_DIR / "decision.json")
+    rc = run_validator()
+    log(f"pruned candidates {json.dumps(dec)} -> {config.OUT_DIR} (validator exit {rc})")
+    return rc
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["diagnose", "write"])
+    ap.add_argument("cmd", choices=["diagnose", "write", "pruned"])
     ap.add_argument("--approach", type=int, default=2)
     ap.add_argument("--variant", choices=["threshold", "threshold+excl"], default="threshold+excl")
     ap.add_argument("--tau", type=float, default=None, help="global threshold (default: the one chosen on the tune fold)")
@@ -140,6 +163,9 @@ def main():
     if a.cmd == "diagnose":
         diagnose(a.approach, a.name)
         return
+    if a.cmd == "pruned":
+        assert a.name and a.out, "pruned needs --name and --out"
+        sys.exit(pruned(a.name, a.out))
     if not a.out:
         sys.exit("--out is required for write (never overwrite the main output/ by accident)")
     tau = a.tau
