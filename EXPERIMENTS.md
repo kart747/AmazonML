@@ -752,3 +752,40 @@ amazonml-99 packages this as `sub08_xd_s2lab_all_veto`, built from `output_varia
 
 - The house-number mixture (planted India ≈ 0.21, true ≈ kept-by-both) estimates 72% true for additions and 40% for drops, against the actual 78.5% and 48%. It points the right way and is slightly conservative.
 - The same estimate on France sub09 gives about 97% of additions true (0.952 vs 0.985 kept-by-both, planted 0.02) and about 48% of drops true. That is far above the ~67% break-even, so the predicted France part is **+0.0004 (at the proxy's own 0.785/0.52) to +0.0008**.
+
+## E-G11. Can anything label the unseen country's uncertain band? (US→India proxy; scripts in `src/experiments/scratch_g11/`)
+**Setup.**
+- All work_loco pairs (US and India, folds 3 and 0) are scored by the US-only stage 2 (`loco_all.py`).
+- Band = kept-out pairs with 0.02 ≤ p < 0.68. India band per fold: ~66k pairs, 33% true (22k); US band: 19% true.
+- Rules are defined a priori. India fold 0 is only ever read for scoring.
+- **Why this band:** France's same-house-number rejected band is 251 per 1000 S1. That equals the unseen proxy (256), against 47/80 on US/India test and 36/50 on eval. So France's band behaves like a fully unseen country's.
+
+| label source (band only) | India precision f3 / f0 | coverage of band true | verdict |
+|---|---|---|---|
+| acronym (any address) | 0.97 / ~0.97 | 0.4% | precise, negligible |
+| core names equal & exact address | 0.996 | 1.3% | precise, negligible |
+| token subset & exact address | 0.964 | 1.5% | precise, negligible |
+| core names equal (legal forms stripped), any address | 0.385 | 30% | fails |
+| same first number & address Jaccard ≥ 0.5 | 0.33 | 19% | fails |
+| one-word swap / typo swap | 0.24 / 0.20 | 9% / 1.4% | fails |
+| **co-training**, US-only name-view GBM ≥ 0.95 (`cotrain.py`) | 0.53 / 0.54 | 10% | fails |
+| co-training, address-view GBM ≥ 0.95 | 0.64 / 0.63 | 37% | fails |
+| both views ≥ 0.9 | 0.95 / 0.95 | 5.6% | precise, small |
+| pretrained multilingual e5 cosine ≥ 0.90 / 0.95 (non-Latin targets) | 0.58 / 0.76 | 28% / 3.6% | fails |
+
+**What the band is.**
+- True band pairs spread over every name × address cell. 32% have a different address, 14% an empty target address, and 45% a name relation no rule captures: phonetic back-transliteration ("blaik blaik bildrs praivet limited"), "private limited" ↔ "ltd", heavy address truncation.
+- The negatives are planted near-duplicates: house number shifted 20→15 or 1386→1393, `+infratech`, a private→public legal-form swap.
+- They are textually as close as true copies by construction. So neither rules, source-trained views, nor pretrained semantic similarity separates them.
+- Only target-country labels do: the same LightGBM and 92 features trained on India labels reach 0.983 (E-G5).
+
+**Verdicts.**
+- Independent-signal weak supervision: REJECTED at the gate. Precise rules cover ~3% of band true pairs.
+- Co-training with source-trained views: REJECTED.
+- A pretrained cross-encoder / multilingual similarity as an unseen-country labeler: not justified by the e5 evidence.
+- Model-family swaps (CatBoost/XGBoost/ensembles): no mechanism to fix a *labels* problem. Two competitors measured ensembles flat or negative (OpenCode pass 2).
+
+**ID / row-order leakage check (train):**
+- corr(S1 id, true target id) = 0.0001.
+- The median row gap between copies of one S1 is 1.1M rows; the share of adjacent copies is 3e-7.
+- There is no structural shortcut in the data.
