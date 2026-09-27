@@ -599,3 +599,53 @@ Prompted by amazonml-27's LOCO finding: unseen-country misses are obvious matche
 - A stricter confidence schedule is worse. More labelled rows beat cleaner labels here.
 - The pseudo-negative error grows each round. Those are amazonml-27's "obvious misses" (Pvt Ltd vs Private Limited, native script) fed back as negatives, which reinforces the transfer error. The next variants (positives-only `--lo -1`, `--lo 0.01`) are queued in `work/chain_x11.sh` but **not run** (user pause on heavy jobs, relayed 11:20). They are expected to compose with amazonml-27's legal-form stripping (`legal_strip.py`, also paused).
 - Runtime ~14 min per 3-round run, 8.8 GB peak.
+
+## E-G8. LB-gap investigation: what the public LB can identify, where the errors are, and precision guards (`lb_guards.py`)
+**Metric and format: no discrepancy found.**
+- `ber/metric.py` matches the spec: per-S1 F0.5, singletons 1/0, blocking misses count as FN, mean over every S1 of the fold.
+- The upload #1 file is clean: no BOM, CR or spaces, exactly 2 columns, 1,732,544 rows, `--check-ids` PASS.
+- The official validator says unknown IDs lower the score but are not rejected. So a scorer that drops rows does not exist for format reasons.
+- Test S1 do not break exclusivity: exact name+address S1 duplicates are 0–0.001%. Targets with ≥2 S1 above τ: France 0.0078/S1, India 0.0024, US 0.0003 (eval 0.0001–0.0003); the pairs lost to exclusivity are ≤0.009/S1.
+
+**The public LB is not population-weighted, and per-country F is not identifiable from probes.**
+- Test S1 are 38.3% US, 46.8% India and 15.0% France, uniformly spread over row order and ID range.
+- harshgitty58's blank probes (full 0.969; blank US 0.578, India 0.580, France 0.836) give drops w_c·(F_c − s_c) = 0.391 / 0.389 / 0.133. The US drop exceeds its population share (0.383), which is impossible because F − s < 1. The drops imply roughly US 0.43 / India 0.43 / France 0.146, i.e. the scored public set is not a uniform S1 sample (or not every test S1 is scored).
+- Within one country, every probe score is w_c × (a per-S1 average). A blank gives w_c·(F_c − s_c) and an all-wrong gives w_c·F_c, so w_c and F_c only ever appear as a product. With w_FR bounded only to 0.141–0.158 by harsh's data, the France-blank probe (sub06) yields F_FR ± ~0.05.
+- **Differential uploads are exact:** a country-isolated change gives ΔLB = w_c·ΔF_c to 5 decimals, ±4% relative in w.
+
+**Label-free position of France (shipped model; LOCO = US-only stage 1+2 scored on India fold 0, true F 0.922):**
+
+| | kept/S1 | mid mass 0.05–0.99 /S1 | >0.999 mass /S1 | E[F] if calibrated | true F |
+|---|---|---|---|---|---|
+| eval India / US | 3.37 / 3.37 | 0.36 / 0.37 | 2.90 / 3.01 | 0.9907 / 0.9908 | 0.9866 / 0.9879 |
+| LOCO India unseen | 3.22 | 1.30 | 1.87 | 0.9603 | **0.9219** |
+| test US / India | 3.39 / 3.37 | 0.45 / 0.47 | 2.99 / 2.87 | 0.9887 / 0.9879 | ? |
+| test France | 3.40 | **0.76** | 2.83 | **0.9798** | ? |
+
+France sits 10–43% of the way from in-country to unseen on these statistics, which suggests France ≈ 0.96–0.97. But if US/India lose only the simulated ~0.0025, LB 0.97741 needs France ≈ 0.935 under either weighting. The two do not close without confident errors that score distributions cannot show. Range: France contributes 0.003–0.008 of the 0.010 gap and US/India 0.002–0.007. Seven public pipelines (local 0.91–0.987) all lose 0.007–0.016 on the LB. That near-constant gap fits a shared unseen-country cost better than a pipeline-specific bug, except harshgitty58's v2: validation +0.010 bought LB +0.002 with France unchanged.
+
+**Errors found on test, label-free:**
+- **Planted affiliate look-alikes kept on test.** Consider kept pairs whose only name difference is one extra target token:
+  - US: `+group` 2.36 vs 0.06 per 1000 S1 on eval, `+holdings` 0.52 vs 0.04.
+  - India: `+group` 3.1 vs 0.1, `+ventures` 1.9 vs 0.09, `+industries`, `+enterprises` and `+public` ~1.2 each vs <0.1.
+  - Train true rate of these single-token pairs: 0/4197 group, 0/3865 holdings, and so on.
+  - Their house-number agreement on test equals the train planted ones (US `+group` hn_eq 0.011 train and test), so they are planted.
+- **France same-street, different-house-number look-alikes kept.** Parser: the number before a French street word.
+  - House-number difference rate of confident pairs (p ≥ 0.999): France 0.39%, against US 6.9% and India 2.6% on eval, where it matches the true-pair rate ×1.2.
+  - France kept pairs: 1.27%, i.e. 9,140 pairs (35 per 1000 S1) with the same street and a different number, mean p 0.94. Examples: "Sauvegarde Sport" 25 vs 420 Rue Saint Rogatien (p 0.9998); "Lille Garage" 121 vs 1 Rue Colbert.
+  - Expected true share from France's own noise rate: ~37%, so ~63% (≈5,800) are planted.
+  - The same rule on US/India eval removes 91 true pairs out of 93, so it is France-only.
+- **France recall leak (not fixed).** Rejected pairs at the same house number: 257 per 1000 S1 in the p 0.02–0.68 band, against US 46 and India 82. They include acronym and domain copies at the identical address ("Bordeaux Amicale" ↔ "BA", "Club du Sports" ↔ "CS", "Lesperance Hotel" ↔ "lhotel.com") and suffix drops ("Nantes Ecole SAS" ↔ "Nantes Ecole", p 0.53). They also include true same-address different businesses (France: 11.9% of S1 share an address).
+- US test is structurally like eval with the US-format parser (66% coverage): p ≥ 0.999 kept pairs differ in house number 6.92% vs 6.87%. The only excess is ~8 pairs per 1000 S1 in the p 0.68–0.9 band.
+
+**Guards (`lb_guards.py`, applied to saved scores, no retraining):**
+- `veto`: 46 affiliate/branch tokens learned on tune fold 3 (n ≥ 50, true rate ≤ 2%). Eval fold 0: 0.98742 → 0.98748, 49 pairs removed, 0 true.
+- `frhn`: the France house-number rule above.
+- Test removals: veto US 1,840 + India 2,826; frhn France 9,140.
+- dense_mix keeps almost the same pairs (4,126 / 8,719), so density training does not address this.
+- Predicted Δ public LB vs 0.97741: veto +0.0007 (planted share 1.0). frhn −0.0001 / +0.0003 / +0.0006 / +0.0009 at planted share 0.3 / 0.5 / 0.63 / 0.8, break-even 0.37.
+- Files, all validator PASS with `--check-ids` and subset 0:
+  - `output_variants/xd_s2lab_all_guard{,_veto,_frhn}` (sha c2646be519ec / 6e0b948bc083 / 7ef1582ac4c5)
+  - `output_variants/xd_dense_mix_guard` (30b40af80b25)
+  - package `submission/sub07_xd_s2lab_all_guard` (locked)
+- Non-target countries are byte-identical to upload #1 in `_veto` (France: 1 row) and `_frhn` (US/India: 0 rows).

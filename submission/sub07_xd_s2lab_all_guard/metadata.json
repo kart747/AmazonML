@@ -1,0 +1,18 @@
+{
+  "submission_id": "sub07_xd_s2lab_all_guard",
+  "purpose": "candidate + diagnostic: upload #1 minus planted look-alike FPs (affiliate-token veto US/India, same-street/different-house-number guard France)",
+  "upload_file": "output/matching_results.tsv",
+  "files": {
+    "output/matching_results.tsv": {"sha256": "c2646be519ec0fec0fea1865563189243f9a27a6513384a301f5d912ee1d7717", "data_rows": 1732544, "matched_pairs": 5846999},
+    "output/candidate_pairs.tsv": {"sha256": "23caf70a1767123e3b01c8b136436aa0f8bd677561266aa55ec5dfea2eb70a54", "data_rows": 1732544, "candidate_pairs": 9585603, "candidates_per_s1": 5.533}
+  },
+  "copied_from": "output_variants/xd_s2lab_all_guard (byte-identical)",
+  "base": "upload #1 sha f9ff0a26696c (sub03p), keep column of work_xd/reports/test_s2lab_all_pairs.parquet",
+  "removed_pairs": {"US": 1840, "India": 2826, "France": 9141},
+  "changed_s1_rows": {"US": 1773, "India": 2734, "France": 6320},
+  "local_validation": {"veto_fold0": "0.98742 -> 0.98748, 49 pairs removed, 0 true", "veto_fold3": "0.98783 -> 0.98787, 30 removed, 0 true", "frhn": "no France labels; the same rule on US/India fold 0 removes 93 pairs, 91 true, which is why it is France-only"},
+  "predicted_public_delta": {"veto": 0.0007, "frhn_at_planted_share": {"0.3": -0.0001, "0.5": 0.0003, "0.63": 0.0006, "0.8": 0.0009}},
+  "git": {"code": "src/experiments/lb_guards.py"},
+  "reproduce": ["cd code/business_entity_resolution && BER_WORK_DIR=../../work_xd python src/experiments/lb_guards.py write --rules veto,frhn --out <dir>"],
+  "leaderboard": {"public_f05": null, "uploaded_at": null}
+}
