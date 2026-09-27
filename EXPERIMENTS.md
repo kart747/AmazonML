@@ -551,3 +551,38 @@ Prompted by amazonml-27's LOCO finding: unseen-country misses are obvious matche
   - Long legal-form phrases (société à responsabilité limitée, …): 0 occurrences.
 - **Upper bound for the alias fix:** 390 below-τ pairs, i.e. ≤ +0.0015 France F0.5, ≈ +0.0002 LB. Implemented as opt-in `fr_renorm.py setup --legal-alias` (compagnie→cie, etablissements→ets; default = E-G1 behaviour, unit-tested). **Not built or scored**: that needs the France feature rebuild in work_fr, which is paused under the no-heavy-runs rule.
 - **Open question (not acted on):** do the target-only `holding`/`participations`/`distribution`/`international` names mark affiliates (negatives) or noise on true matches? In US train, the branch-word class (`midtown` etc.) is the natural label analogue.
+
+## E-G6. Which stage-2 feature groups break unseen-country transfer (`loco_ablate.py`, work_loco)
+- **Hypothesis:** a feature group whose meaning shifts between countries (p1 context, name frequency/IDF, density context, source) causes the E-G5 loss, so dropping it would make stage 2 transfer.
+- **Implementation:**
+  - Each configuration trains a US-only stage 2 on folds 1,2 in the full leave-one-country-out world, with early stopping on US fold 3.
+  - τ comes from the US tune fold, and India eval fold 0 is reported (thr+excl).
+  - Runtime: 8 fits, ~14 min, <6 GB.
+- **Result:**
+
+| features removed | n | US tune F0.5 | India eval @ τ from US tune | India best τ → F0.5 |
+|---|---|---|---|---|
+| none (s2lab_all) | 92 | 0.98815 | 0.92142 | 0.55 → 0.92355 |
+| p1-derived (10) | 82 | 0.98805 | 0.92253 | 0.60 → 0.92493 |
+| freq/IDF (11) | 81 | 0.98553 | 0.92372 | 0.55 → 0.92463 |
+| density context (11) | 81 | 0.98799 | 0.91640 | 0.50 → 0.91975 |
+| source (t_src, t_nonascii) | 90 | 0.98812 | 0.92311 | 0.50 → 0.92458 |
+| p1 + freq | 71 | 0.98509 | 0.92576 | 0.65 → 0.92685 |
+| p1 + context | 71 | 0.98496 | 0.92309 | 0.55 → 0.92372 |
+| everything except pairwise similarity | 58 | 0.97576 | 0.91685 | 0.65 → 0.91689 |
+
+- **Decision:** rejected as a fix. No group explains the ~0.06 loss (best +0.004 for p1+freq, which costs 0.003 in-country). Even pairwise-only similarity transfers equally badly, so the loss is in what name/address similarity means in each country.
+- **Threshold for the unseen country:**
+
+| τ | 0.55 | 0.68 | 0.80 | 0.85 | 0.90 |
+|---|---|---|---|---|---|
+| India F0.5 | 0.92355 | 0.92189 | 0.91739 | 0.91364 | 0.90761 |
+
+  So τ_FR↑ is the wrong direction whenever France is recall-limited. amazonml-46 withdrew the τ_FR 0.80–0.90 variants.
+- **Error analysis** (US-only vs India-trained stage 2 in the same world):
+  - 20,926 India true pairs are missed by the US-only model but caught by the India-trained one; 10,197 negatives go the other way.
+  - The misses are obvious matches: "Pvt. Ltd." / "Pvt. Limited", "Private Limited" / "Private Ltd", "& Co" / "& Company", native-script copies.
+  - Their strongest shift is r_rev (mean 7.8 vs 0.1 on hits). The US-only model reads "another S1 ranks higher for this target" as a non-match, but India has many near-identical sibling names.
+- **France test fingerprint:** one-side-only name tokens in the uncertain band (p 0.1–0.9), relative to p>0.99 pairs: snc 149×, associes 48×, club/ecole/amicale/comite/centre ~4×.
+- **Follow-up E-G7** (`legal_strip.py`, strip legal-form tokens for the unseen country, validated first on India in work_loco): written, NOT run. The user paused heavy runs, as relayed by amazonml-01. amazonml-01's E-X11 also shows legal-form differences carry label signal in US train (a different form is true 36% of the time vs 93% for the same form; one-sided 73%), so blanket stripping is doubtful for France. The one-sided case is the open question.
+- **Self-training** (amazonml-46, same world): 3 rounds lift 0.92142 → 0.92979 → 0.93072 → 0.93130, with pseudo-negative error 4.5% → 8.5%.
