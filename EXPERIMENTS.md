@@ -737,3 +737,18 @@ amazonml-99 packages this as `sub08_xd_s2lab_all_veto`, built from `output_varia
 | ΔLB (×0.146) | +0.00075 | +0.00059 | +0.00039 | +0.00009 | −0.0002 |
 
   - Package: `submission/sub09_xd_s2lab_all_veto_frplfr` (sha f2d30683e1c2, validator PASS, locked).
+
+## E-G10. sub08 on the LB, and a transductive replay of the France self-training in the unseen-country proxy (`plfr_replay.py`)
+- **sub08 (veto only) public LB 0.978**, against 0.97741 for upload #1, i.e. about +0.0006. The E-G9 prediction was +0.00046…+0.00072 (+0.00062 at 90% planted). This confirms the veto, the house-number planted estimate, and the per-S1 Monte Carlo × public weights (0.43/0.43/0.146) used for sub09.
+- **Replay of E-X7 exactly as done for France** (transductive):
+  - Setup: the US-only stage 2 labels India fold 0 itself (p ≥ 0.95 and the target's best S1 → 1; p ≤ 0.05 → 0). It is retrained on US folds 1,2 plus those rows and re-predicts fold 0. Pseudo rows: 369,774. Positive precision 0.979, negative error 0.042.
+  - India F0.5 **0.92189 → 0.93074 (+0.0089)** at τ 0.68 (τ 0.70: 0.93072).
+
+| vs base | n | true | first house number agrees |
+|---|---|---|---|
+| added | 9,345 | **0.785** | 0.621 |
+| dropped | 2,458 | 0.478 | 0.437 |
+| kept by both | 283,265 | 0.966 | 0.781 |
+
+- The house-number mixture (planted India ≈ 0.21, true ≈ kept-by-both) estimates 72% true for additions and 40% for drops, against the actual 78.5% and 48%. It points the right way and is slightly conservative.
+- The same estimate on France sub09 gives about 97% of additions true (0.952 vs 0.985 kept-by-both, planted 0.02) and about 48% of drops true. That is far above the ~67% break-even, so the predicted France part is **+0.0004 (at the proxy's own 0.785/0.52) to +0.0008**.
