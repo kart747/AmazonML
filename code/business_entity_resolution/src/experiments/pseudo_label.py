@@ -15,6 +15,9 @@ Caveat: stage 1 (p1 and everything derived from it) was trained on both countrie
 measures stage-2 transfer only.
 
     BER_WORK_DIR=../work_xd python src/experiments/pseudo_label.py --ref s2lab_all --target India
+    BER_WORK_DIR=../work_xd python src/experiments/pseudo_label.py apply --target France --out <dir>
+      (apply: pseudo-label France TEST pairs with the shipped model, retrain on train folds + them,
+       tau on tune fold 3, report normal fold 0, predict all test -> submission with scored-pair candidates)
 Output: <work>/reports/pseudo_label_<target>.json. RAM ~3 GB at 4 threads.
 """
 import argparse
@@ -70,7 +73,85 @@ def report(m, feats, tu, ev, src, tgt):
     return {"variant": v, "tau": ch[v]["tau"], "source_tune_f05": ch[v]["tune_f05"], "target_eval": e}
 
 
+def apply(ref, target, hi, lo, out_dir, tag):
+    """The real thing: pseudo-label the TARGET country's TEST pairs with the shipped model, retrain
+    stage 2 on train folds + those rows, choose tau on tune fold 3, report normal fold 0, predict test."""
+    from ber.approaches import make_evaluator, write_submission
+    import redecode
+    WD = config.WORK_DIR
+    refm = lgb.Booster(model_file=str(WD / "models" / f"{ref}.txt"))
+    feats = refm.feature_name()
+    s1t = pl.read_parquet(WD / "prep" / "s1_test.parquet", columns=["rid", "country"])
+    tparts = sorted((WD / s2.OUT / "test").glob(f"{target}_*.parquet"))
+    pool = pl.concat([pl.read_parquet(p, columns=["rid", "gid"] + feats) for p in tparts])
+    p = ap._pred(refm, np.ascontiguousarray(pool.select(feats).to_numpy(), dtype=np.float32))
+    best = ap.exclusive_mask(pool.get_column("gid").to_numpy(), p)
+    lab = np.where((p >= hi) & best, 1, np.where(p <= lo, 0, -1))
+    info = {"target": target, "test_rows": pool.height, "pos": int((lab == 1).sum()), "neg": int((lab == 0).sum()),
+            "dropped_middle": int((lab < 0).sum()), "hi": hi, "lo": lo}
+    log(f"pseudo labels on {target} test: {info}")
+    tr = pl.scan_parquet(WD / s2.OUT / "train" / "*.parquet").filter(pl.col("fold").is_in(list(config.TRAIN_FOLDS))) \
+        .select(["rid", "gid", "fold", "y"] + feats).collect()
+    pool = (pool.with_columns(y=pl.Series(lab)).filter(pl.col("y") >= 0)
+                .with_columns(pl.col("y").cast(tr.schema["y"]), fold=pl.lit(-1, dtype=tr.schema["fold"]))
+                .select(tr.columns))
+    tu = pl.scan_parquet(WD / s2.OUT / "train" / "*.parquet").filter(pl.col("fold") == config.TUNE_FOLD) \
+        .select(["rid", "gid", "fold", "y"] + feats).collect()
+    name = f"{ref}_pl{target[:2].lower()}{tag}"
+    with stage(f"pseudo_apply_{name}"):
+        m = fit(pl.concat([tr, pool]), tu, feats)
+        del tr, pool
+        m.save_model(str(WD / "models" / f"{name}.txt"))
+        X = lambda d: np.ascontiguousarray(d.select(feats).to_numpy(), dtype=np.float32)
+        ev = pl.scan_parquet(WD / s2.OUT / "train" / "*.parquet").filter(pl.col("fold") == config.EVAL_FOLD) \
+            .select(["rid", "gid", "fold", "y"] + feats).collect()
+        p_tu, p_ev = ap._pred(m, X(tu)), ap._pred(m, X(ev))
+        g_tu, g_ev = tu.get_column("gid").to_numpy(), ev.get_column("gid").to_numpy()
+        ex = ap.exclusive_mask(np.r_[g_tu, g_ev], np.r_[p_tu, p_ev])
+        ch = ap.choose_decision(make_evaluator(tu, tu.get_column("y").to_numpy(), config.TUNE_FOLD), p_tu, g_tu, ex[:len(g_tu)])
+        v = max(ch, key=lambda k: ch[k]["tune_f05"])
+        tau = ch[v]["tau"]
+        e = make_evaluator(ev, ev.get_column("y").to_numpy(), config.EVAL_FOLD).report(ap.decide(p_ev, g_ev, v, tau, ex[len(g_tu):]))
+        info.update({"model": name, "variant": v, "tau": tau, "tune_f05": ch[v]["tune_f05"], "eval": e,
+                     "best_iteration": m.best_iteration})
+        log(f"{name}: tune {ch[v]['tune_f05']} ({v} tau {tau}) | normal eval F0.5 {e['macro_f05']} P {e['macro_precision']} "
+            f"R {e['macro_recall']} FP {e['false_positive_pairs']}")
+        del tu, ev
+        metas, ps = [], []
+        for part in sorted((WD / s2.OUT / "test").glob("*.parquet")):
+            d = pl.read_parquet(part, columns=["rid", "gid"] + feats)
+            ps.append(ap._pred(m, X(d)))
+            metas.append(d.select("rid", "gid"))
+        meta, pt = pl.concat(metas), np.concatenate(ps)
+        keep = ap.decide(pt, meta.get_column("gid").to_numpy(), v, tau)
+        pairs = meta.with_columns(p=pl.Series(pt), keep=pl.Series(keep))
+        pairs.write_parquet(WD / "reports" / f"test_{name}_pairs.parquet")
+        by = pairs.join(s1t, on="rid").group_by("country").agg(pred=pl.col("keep").sum(), mass=pl.col("p").sum()) \
+            .join(s1t.group_by("country").len("S1"), on="country")
+        info["test_pred_per_s1"] = {r["country"]: round(r["pred"] / r["S1"], 4) for r in by.iter_rows(named=True)}
+        info["test_mass_per_s1"] = {r["country"]: round(r["mass"] / r["S1"], 4) for r in by.iter_rows(named=True)}
+        log(f"test pred/S1 {info['test_pred_per_s1']} | mass/S1 {info['test_mass_per_s1']}")
+        if out_dir:
+            config.OUT_DIR = Path(out_dir).resolve()
+            write_submission(pairs.select("rid", "gid"), keep)
+            info["matched_not_in_candidates"] = redecode.subset_check(config.OUT_DIR)
+            save_json({"model": name, "variant": v, "tau": tau, "tune_f05": ch[v]["tune_f05"],
+                       "pseudo": {k: info[k] for k in ("target", "pos", "neg", "hi", "lo")}}, config.OUT_DIR / "decision.json")
+    save_json(info, WD / "reports" / f"pseudo_apply_{name}.json")
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "apply":
+        b = argparse.ArgumentParser()
+        b.add_argument("cmd")
+        b.add_argument("--ref", default="s2lab_all")
+        b.add_argument("--target", default="France")
+        b.add_argument("--hi", type=float, default=0.95)
+        b.add_argument("--lo", type=float, default=0.05)
+        b.add_argument("--out", default=None)
+        b.add_argument("--tag", default="")
+        y = b.parse_args()
+        return apply(y.ref, y.target, y.hi, y.lo, y.out, y.tag)
     a = argparse.ArgumentParser()
     a.add_argument("--ref", default="s2lab_all")
     a.add_argument("--target", default="India")
