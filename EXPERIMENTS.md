@@ -426,3 +426,15 @@ Normal: tune 0.98759, **eval 0.98743**, FP 2,042. Dense eval @ τ: **0.98632** (
 - **The US half-density hypothesis is rejected.** Deleting half the US S1 together with their true copies makes US slightly *easier*: their siblings' look-alikes disappear with them. India loses the usual −0.003 from orphanization.
 - Neither the S1-pool density nor orphan density reproduces the −0.010 LB gap. With US/India near −0.002, the unexplained loss points to France (unseen) or to error types absent from train.
 - dense_mix beats the shipped model in this world too (+0.0010 overall, +0.0015 India), which supports U2.
+
+## E-X8. Address-ambiguity features (`addr_freq.py`), rejected
+Idea (from amazonml-27's France audit: 11.9% of France test S1 share an exact normalized address with another S1, against 4–5.6% elsewhere): give stage 2 the address analogue of name frequency. q_ad_n / q_ad_rate = S1 sharing this S1's address; t_ad_s1n = S1 at the target's address; t_ad_others = competing S1 at the target's address. These are extra s2lab columns, computed in the normal and in the dense (19% drop) world.
+
+| work_xd, 96 features | normal tune | normal eval | FP | dense tune | dense eval @ normal τ |
+|---|---|---|---|---|---|
+| s2lab_all (reference) | 0.98783 | 0.98742 | 2,328 | 0.98515 | 0.98498 |
+| s2lab_all + adf | 0.98774 | 0.98748 | 2,335 | 0.98512 | 0.98495 |
+| dense_mix (U2) | 0.98768 | 0.98743 | 2,162 | 0.98634 | 0.98625 |
+| dense_mix + adf | 0.98772 | 0.98751 | 2,109 | 0.98643 | 0.98633 |
+
+All deltas are within ±0.0001 (noise), and none of the four features is in the top-25 gain. **Rejected.** Train has too few shared-address S1 for the model to learn the interaction, so a France transfer can't be expected from this. Runtime ~12 min, ≤4.9 GB.
