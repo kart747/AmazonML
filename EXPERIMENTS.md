@@ -438,3 +438,16 @@ Idea (from amazonml-27's France audit: 11.9% of France test S1 share an exact no
 | dense_mix + adf | 0.98772 | 0.98751 | 2,109 | 0.98643 | 0.98633 |
 
 All deltas are within ±0.0001 (noise), and none of the four features is in the top-25 gain. **Rejected.** Train has too few shared-address S1 for the model to learn the interaction, so a France transfer can't be expected from this. Runtime ~12 min, ≤4.9 GB.
+
+## E-G4. Unseen-country stage-2 transfer (`loco_s2.py`, France proxy)
+- **Hypothesis:** France has no training rows, so the France loss can be approximated by scoring a country the stage-2 model never saw.
+- **Implementation:** train the s2lab_all feature set on source-country folds 1,2 (early stop on source fold 3) and score the target country's eval fold 0 over a τ grid (thr+excl), next to the in-country s2lab_all. Stage 1 still saw both countries, so this is only a partial transfer: the real France loss is at least this large.
+- **Result (work_xd, a few minutes each, <6 GB):**
+
+| transfer | F0.5 @ τ 0.68 | P | R | FP pairs | in-country F0.5 | best τ → F0.5 |
+|---|---|---|---|---|---|---|
+| US → India | 0.97787 | 0.99168 | 0.95565 | 2,430 | 0.98665 | 0.68 → 0.97787 |
+| India → US | 0.97949 | 0.98749 | 0.96869 | 5,513 | 0.98794 | 0.85 → 0.98172 |
+
+- **Reading:** an unseen country costs about −0.009 with stage 2 alone. The failure mode is country-specific: recall for India (tokens/scripts US never shows), precision for US (2.4× the in-country FP). No single τ fixes both: raising τ helps the precision-limited direction (+0.0022 at 0.85) and cannot help the recall-limited one.
+- **Implication for France:** with w_FR ≈ 0.15, a France F0.5 of ~0.93–0.96 is plausible and could account for most of the −0.010 LB gap. Whether France is precision- or recall-limited decides the fix (France τ up vs pseudo-labels/renorm). U3 (France-blank probe) measures its F0.5. The full LOCO (stage 1 also trained on US only, `work/chain_loco.sh`) is running as E-G5.
