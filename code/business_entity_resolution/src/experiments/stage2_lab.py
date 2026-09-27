@@ -160,17 +160,50 @@ def _extra_cols(split):
 
 
 def variant_feats(variant, split="train", drop=()):
+    if variant.endswith("+tctx"):
+        return variant_feats(variant[:-5], split, drop) + TCTX_FEATS
     extra = [c for c in _extra_cols(split) if c not in drop]
     return {"base": S2_FEATS, "new": S2_FEATS + NEW_FEATS, "featx": S2_FEATS + extra,
             "all": S2_FEATS + NEW_FEATS + extra}[variant]
+
+
+TCTX_FEATS = ["t_p1_max_other", "t_p1_rank", "t_p1_n50", "t_p1_sum", "t_p1_n"]
+
+
+def build_tctx(split, dirs):
+    """Target-side p1 context over the pruned graph of every given work dir (label-free).
+
+    Only meaningful when the graph covers every S1 of the split, as on test. On train that
+    means folds 0-3 (this dir) plus the reserve folds 4-9 (block_more_folds, e.g. ../work_f49).
+    """
+    srcs = [config.WORK_DIR] + [Path(d) for d in dirs]
+    g = pl.concat([pl.scan_parquet(d / OUT / split / "*.parquet").select("rid", "gid", "p1").collect() for d in srcs])
+    g = g.unique(["rid", "gid"])
+    t = g.with_columns(
+        _m1=pl.col("p1").max().over("gid"), _m2=pl.col("p1").top_k(2).min().over("gid"),
+        t_p1_n=pl.len().over("gid").cast(pl.Float32),
+        t_p1_rank=pl.col("p1").rank("ordinal", descending=True).over("gid").cast(pl.Float32),
+        t_p1_n50=(pl.col("p1") > CONF).sum().over("gid").cast(pl.Float32),
+        t_p1_sum=pl.col("p1").sum().over("gid").cast(pl.Float32),
+    ).with_columns(
+        t_p1_max_other=pl.when(pl.col("t_p1_n") < 2).then(0.0)
+        .when(pl.col("p1") == pl.col("_m1")).then(pl.col("_m2")).otherwise(pl.col("_m1")).cast(pl.Float32)
+    ).select("rid", "gid", *TCTX_FEATS)
+    dst = config.WORK_DIR / OUT / f"tctx_{split}.parquet"
+    t.write_parquet(dst)
+    log(f"tctx {split}: {t.height:,} pairs from {len(srcs)} dirs; S1 covered {g.get_column('rid').n_unique():,} -> {dst}")
 
 
 def load(split, folds, feats, base=None):
     lf = pl.scan_parquet((Path(base) if base else config.WORK_DIR) / OUT / split / "*.parquet")
     if folds is not None:
         lf = lf.filter(pl.col("fold").is_in(list(folds)))
-    cols = ["rid", "gid", "fold"] + (["y"] if split == "train" else []) + feats
+    tx = [f for f in feats if f in TCTX_FEATS]
+    cols = ["rid", "gid", "fold"] + (["y"] if split == "train" else []) + [f for f in feats if f not in tx]
     df = lf.select(cols).collect()
+    if tx:  # target-side context always comes from the main dir's tctx file (covers all dirs)
+        t = pl.read_parquet(config.WORK_DIR / OUT / f"tctx_{split}.parquet", columns=["rid", "gid"] + tx)
+        df = df.join(t, on=["rid", "gid"], how="left", maintain_order="left")
     X = np.ascontiguousarray(df.select(feats).to_numpy(), dtype=np.float32)
     return df.select(["rid", "gid", "fold"] + (["y"] if split == "train" else [])), X
 
@@ -339,7 +372,7 @@ def density(names, extras, drop_frac=0.19):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("cmd", choices=["build", "evaluate", "predict", "density"])
+    ap.add_argument("cmd", choices=["build", "evaluate", "predict", "density", "tctx"])
     ap.add_argument("--split", default="train")
     ap.add_argument("--extra", default="", help="comma-separated row-aligned feature sets, e.g. featx")
     ap.add_argument("--variant", default="new")
@@ -356,6 +389,8 @@ def main():
         tfs = tuple(int(x) for x in a.train_folds.split(",") if x) or None
         evaluate(a.variant, a.tag, json.loads(a.params), tfs, [d for d in a.more_train.split(",") if d],
                  [c for c in a.drop.split(",") if c])
+    elif a.cmd == "tctx":
+        build_tctx(a.split, [d for d in a.more_train.split(",") if d])
     elif a.cmd == "density":
         density([f"s2lab_{v}" for v in a.variant.split(",")], [x for x in a.extra.split(",") if x])
     else:
