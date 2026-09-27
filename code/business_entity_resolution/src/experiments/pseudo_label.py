@@ -73,7 +73,7 @@ def report(m, feats, tu, ev, src, tgt):
     return {"variant": v, "tau": ch[v]["tau"], "source_tune_f05": ch[v]["tune_f05"], "target_eval": e}
 
 
-def apply(ref, target, hi, lo, out_dir, tag):
+def apply(ref, target, hi, lo, out_dir, tag, target_src=None, mix_dense=False):
     """The real thing: pseudo-label the TARGET country's TEST pairs with the shipped model, retrain
     stage 2 on train folds + those rows, choose tau on tune fold 3, report normal fold 0, predict test."""
     from ber.approaches import make_evaluator, write_submission
@@ -82,7 +82,11 @@ def apply(ref, target, hi, lo, out_dir, tag):
     refm = lgb.Booster(model_file=str(WD / "models" / f"{ref}.txt"))
     feats = refm.feature_name()
     s1t = pl.read_parquet(WD / "prep" / "s1_test.parquet", columns=["rid", "country"])
-    tparts = sorted((WD / s2.OUT / "test").glob(f"{target}_*.parquet"))
+    # target_src: another work dir whose s2lab/test/<target>_*.parquet replace this one's (e.g. re-normalised
+    # France features); every other country's test parts still come from WD
+    TS = Path(target_src) if target_src else WD
+    tparts = sorted((TS / s2.OUT / "test").glob(f"{target}_*.parquet"))
+    assert tparts, f"no {target} test parts in {TS / s2.OUT / 'test'}"
     pool = pl.concat([pl.read_parquet(p, columns=["rid", "gid"] + feats) for p in tparts])
     p = ap._pred(refm, np.ascontiguousarray(pool.select(feats).to_numpy(), dtype=np.float32))
     best = ap.exclusive_mask(pool.get_column("gid").to_numpy(), p)
@@ -98,8 +102,15 @@ def apply(ref, target, hi, lo, out_dir, tag):
     tu = pl.scan_parquet(WD / s2.OUT / "train" / "*.parquet").filter(pl.col("fold") == config.TUNE_FOLD) \
         .select(["rid", "gid", "fold", "y"] + feats).collect()
     name = f"{ref}_pl{target[:2].lower()}{tag}"
+    fit_tu = tu
+    if mix_dense:   # density_train --mix recipe: + dense-world train folds, early stopping on the dense tune fold
+        import density_train as dt
+        dn = pl.scan_parquet(WD / dt.DENSE / "train" / "*.parquet").select([pl.col(c).cast(tr.schema[c]) for c in tr.columns])
+        tr = pl.concat([tr, dn.filter(pl.col("fold").is_in(list(config.TRAIN_FOLDS))).collect()])
+        fit_tu = dn.filter(pl.col("fold") == config.TUNE_FOLD).collect()
+        log(f"mix_dense: training rows {tr.height:,} (+ {pool.height:,} pseudo), dense tune rows {fit_tu.height:,}")
     with stage(f"pseudo_apply_{name}"):
-        m = fit(pl.concat([tr, pool]), tu, feats)
+        m = fit(pl.concat([tr, pool]), fit_tu, feats)
         del tr, pool
         m.save_model(str(WD / "models" / f"{name}.txt"))
         X = lambda d: np.ascontiguousarray(d.select(feats).to_numpy(), dtype=np.float32)
@@ -116,9 +127,14 @@ def apply(ref, target, hi, lo, out_dir, tag):
                      "best_iteration": m.best_iteration})
         log(f"{name}: tune {ch[v]['tune_f05']} ({v} tau {tau}) | normal eval F0.5 {e['macro_f05']} P {e['macro_precision']} "
             f"R {e['macro_recall']} FP {e['false_positive_pairs']}")
-        del tu, ev
+        if mix_dense:
+            s1d, dropped = dt.dropped_s1(0.19)
+            info["dense"] = dt._score(m, feats, dt.DENSE, config.EVAL_FOLD, config.TUNE_FOLD, True, dropped, s1d, tau_normal=tau)
+            log(f"{name}: dense tune {info['dense']['tune']['tune_f05']} | dense eval at tau {tau}: "
+                f"{info['dense']['eval_at_tau']['macro_f05']} FP {info['dense']['eval_at_tau']['false_positive_pairs']}")
+        del tu, ev, fit_tu
         metas, ps = [], []
-        for part in sorted((WD / s2.OUT / "test").glob("*.parquet")):
+        for part in sorted(q for q in (WD / s2.OUT / "test").glob("*.parquet") if not q.name.startswith(target)) + tparts:
             d = pl.read_parquet(part, columns=["rid", "gid"] + feats)
             ps.append(ap._pred(m, X(d)))
             metas.append(d.select("rid", "gid"))
@@ -150,8 +166,10 @@ def main():
         b.add_argument("--lo", type=float, default=0.05)
         b.add_argument("--out", default=None)
         b.add_argument("--tag", default="")
+        b.add_argument("--target-src", default=None, help="work dir holding the target country's s2lab test parts")
+        b.add_argument("--mix-dense", action="store_true", help="also train on density_train's dense-world rows")
         y = b.parse_args()
-        return apply(y.ref, y.target, y.hi, y.lo, y.out, y.tag)
+        return apply(y.ref, y.target, y.hi, y.lo, y.out, y.tag, y.target_src, y.mix_dense)
     a = argparse.ArgumentParser()
     a.add_argument("--ref", default="s2lab_all")
     a.add_argument("--target", default="India")

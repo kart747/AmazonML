@@ -345,3 +345,33 @@ France is 15% of test (~15% of the public LB) and has no labels. Proxy: India is
 - Pseudo-labelling recovers **31%** of the unseen-country gap (0.0028 of 0.0091), all of it through recall. Precision and FP stay flat.
 - Implication for France: the shipped model is in the "US+India → France" position, so a France stage-2 gap of the same order (~0.009 on France, ~0.0014 on the LB at 15% weight) is plausible. Pseudo-labelling France test pairs with the shipped model and retraining stage 2 on train + France pseudo-rows could recover about a third of it. It cannot be validated on France itself; the proxy above is the only evidence.
 - Runtime 13.6 min, 7.2 GB peak at 4 threads.
+
+## E-X5. LB ground truth for upload #1, and the local→LB gap (parallel track, post-reboot)
+**Upload #1** (08:42 IST): xd + s2lab_all, matching sha f9ff0a26696c (= SUBMISSIONS rows 3/3p = `submission/sub03p_xd_s2lab_all`). **Public LB 0.97741** against local fold 0 0.98742: **−0.0100**. The density simulation predicted −0.0024, which explains only a quarter.
+What the gap is NOT (label-free and local evidence, all on the shipped model):
+- **Not the country mix.** Local per country: India 0.98665 (P 0.99613, R 0.96917), US 0.98794 (P 0.99700, R 0.97085).
+- **Not France retrieval.** The best-candidate combo cosine per test S1 is highest in France (median 1.00, q10 0.894; India 0.972/0.795; US 0.991/0.827). The share of S1 whose best candidate is < 0.5 is 0.03–0.09% everywhere.
+- **Not visible prediction volume.** Test pred/S1: France 3.40, India 3.37, US 3.39. Empty: 5.4/5.8/5.8%. ≥6 matches: 10.8/10.3/10.5%. Fold 0: 3.37 pred vs 3.47 true; 5.8% empty vs 5.6% true.
+- **Not more true copies per S1.** p > 0.99 mass per S1 is unchanged (E-X3).
+
+Arithmetic: if US/India lose the density-sim −0.0024 on test and France is ~15% of the public set, then 0.97741 ⇒ **France ≈ 0.93**. France is unseen in every learned stage: stage 1, stage 2, featx dictionary and normalization. The stage-2-only US→India proxy (E-X4) already shows −0.009, so France is the prime suspect for most of the gap, with harder test orphans second.
+
+## E-X6. Density-augmented stage 2 (`density_train.py`, work_xd; 19% S1 dropped with the same mask as density.py)
+Dense-world s2lab parts for folds 0–3: build 10.9 min, **peak 15.9 GB** (run solo). Same 92 features as s2lab_all.
+
+| stage 2 | normal tune | normal eval F0.5 | normal FP | dense tune | dense eval @ normal τ | dense FP | density loss |
+|---|---|---|---|---|---|---|---|
+| s2lab_all (shipped, upload #1) | 0.98783 | 0.98742 | 2,328 | 0.98515 | 0.98498 | 3,800 | −0.0024 |
+| dense-only training | 0.98660 | 0.98642 | 3,063 | 0.98630 | 0.98631 | 2,521 | −0.0001 |
+| **dense + normal training (`--mix`)** | 0.98768 | **0.98743** | 2,162 | **0.98634** | **0.98625** | 2,542 | **−0.0012** |
+
+- **dense_mix is the strict improvement**: normal eval equal (+0.00001), test-like density **+0.0013**, density loss halved, FP down at both densities.
+- Test (`output_variants/xd_dense_mix`, τ 0.68 from the dense tune, pruned candidates, subset check 0): 5,849,442 matches (−11,364 vs upload #1). pred/S1 changes: France 3.403 → 3.379 (−0.025), India −0.004, US −0.003. The model drops the most France merges.
+- Evaluate: 6.7 min each, 3.4–3.7 GB.
+
+## E-X7. France pseudo-labelling on test (`pseudo_label.py apply`)
+The shipped s2lab_all labels France test pairs: p ≥ 0.95 and the target's best S1 → 1 (845,543); p ≤ 0.05 → 0 (607,085); 158,717 dropped. Stage 2 is retrained on train folds 1,2 plus the France pseudo rows, with τ on tune fold 3.
+- Normal: tune 0.98760 (−0.0002), **eval 0.98744** (+0.00002), FP 2,190. US/India are unaffected, as intended.
+- Test: France pred/S1 3.403 → 3.427 (+0.024), mass/S1 3.503 → 3.468. The France distribution gets sharper (more recall, fewer uncertain pairs), matching the proxy (E-X4: +0.0028 on the unseen country, all through recall).
+- File: `output_variants/xd_s2lab_all_plfr` (5,862,360 matches, subset check 0). France-only effect on the LB ≈ w_FR · ΔF_FR.
+- Running: the combination (dense_mix labels France, then dense+normal+France pseudo rows) → `output_variants/xd_dense_mix_plfr`.
