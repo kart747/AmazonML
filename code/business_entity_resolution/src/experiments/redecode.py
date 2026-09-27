@@ -132,6 +132,19 @@ def write(approach, variant, tau, country_tau, out):
     return rc
 
 
+def subset_check(out):
+    """Hard check (the official validator only warns): every matched id is in that S1's candidates."""
+    def load(f, col):
+        return (pl.read_csv(Path(out) / f, separator="\t", quote_char=None, schema_overrides={col: pl.String})
+                  .with_columns(pl.col(col).fill_null("").str.split(",")).explode(col)
+                  .filter(pl.col(col) != "").rename({col: "id"}))
+    m = load("matching_results.tsv", "matched_entity_ids")
+    c = load("candidate_pairs.tsv", "candidate_entity_ids")
+    bad = m.join(c, on=["source1_entity_id", "id"], how="anti").height
+    log(f"subset check {out}: {m.height:,} matched ids, {c.height:,} candidate ids, {bad} matched ids not in candidates")
+    return bad
+
+
 def pruned(name, out):
     """Rewrite a submission with candidate_pairs = the pairs the final model scored (keep unchanged)."""
     W = config.WORK_DIR
@@ -143,6 +156,8 @@ def pruned(name, out):
     dec = {"source_scores": f"test_{name}_pairs.parquet", "candidates": "pairs scored by the final model",
            "candidate_pairs": pairs.height, "candidates_per_s1": round(pairs.height / n1, 3),
            "matched_pairs": int(keep.sum())}
+    dec["matched_not_in_candidates"] = subset_check(config.OUT_DIR)
+    assert dec["matched_not_in_candidates"] == 0
     save_json(dec, config.OUT_DIR / "decision.json")
     rc = run_validator()
     log(f"pruned candidates {json.dumps(dec)} -> {config.OUT_DIR} (validator exit {rc})")
@@ -151,7 +166,7 @@ def pruned(name, out):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("cmd", choices=["diagnose", "write", "pruned"])
+    ap.add_argument("cmd", choices=["diagnose", "write", "pruned", "check"])
     ap.add_argument("--approach", type=int, default=2)
     ap.add_argument("--variant", choices=["threshold", "threshold+excl"], default="threshold+excl")
     ap.add_argument("--tau", type=float, default=None, help="global threshold (default: the one chosen on the tune fold)")
@@ -163,6 +178,9 @@ def main():
     if a.cmd == "diagnose":
         diagnose(a.approach, a.name)
         return
+    if a.cmd == "check":
+        assert a.out, "check needs --out <submission dir>"
+        sys.exit(1 if subset_check(a.out) else 0)
     if a.cmd == "pruned":
         assert a.name and a.out, "pruned needs --name and --out"
         sys.exit(pruned(a.name, a.out))

@@ -75,14 +75,32 @@ Pipeline: `prepare → block → features → evaluate (fit on train folds, tune
 - **Exact top-K at scale:** the sparse top-K kernel keeps an item-sized accumulator per thread. Splitting the items into
   65,536-row column blocks and merging the per-block top-K is **17× faster with identical results**
   (India, 4.1M targets: 17.8 → 1.0 ms/query). Pruning frequent n-grams was rejected: it cost 5–15 points of recall.
-- **Candidate pairs generated:** train query folds [[TBD: total from reports/blocking_train.json]]; test [[TBD]].
-  India train (353,705 query S1): 14.78M pairs, 41.8 per S1 (p50 29, p95 105, p99 217).
+- **Cross-script views (India):** 53% of India blocking misses had an Indic-script target name. anyascii spells
+  "लक्ष्मी" as "lksmi", which shares almost no 3-grams with "laxmi". Two reverse views run only for non-Latin-script targets:
+  **xs** maps native tokens through a native→Latin token dictionary learned from true pairs of the *training folds only*
+  (802 maps), then runs combo retrieval, target → S1, keeping rank < 2. **dn** is multilingual-e5-small (MIT, 118M)
+  embeddings, target → S1, keeping rank < 1. Together they add 0.97 pairs per India S1 and raise India pair recall from
+  0.97315 to 0.98521 (train query folds).
+- **Three stages up to the final candidate set.** `candidate_pairs.tsv` holds the last set, the one the final model scores:
+  1. **Retrieval** (the views above): 41.6 pairs per S1 on eval fold 0, 49.9 per S1 on test (86.4M pairs).
+  2. **Learned filter** (stage 1, a LightGBM over pairwise and retrieval-context features, cross-fitted): scores every
+     retrieved pair and keeps p1 ≥ 1e-3.
+  3. **Matcher** (stage 2): runs inference only on the kept pairs, **4.77 per S1 on eval fold 0 and 5.53 per S1 on test**
+     (US 5.31, India 5.50, France 6.21; 9.59M pairs). The filter loses 61 of 765,153 eval-fold true pairs: pair recall is
+     0.98779 against 0.98787 for the retrieved set.
+  *Disclosure:* the 5.5 per S1 is not pure retrieval output. Stage 1 scores the full retrieved list, and several stage-2
+  context features aggregate those stage-1 scores over the S1's full list (rank, gap, sum, count above 0.5, best other
+  target). Every matched pair is in `candidate_pairs.tsv`; this is checked with `redecode.py check`.
+- **Candidate pairs generated (retrieval stage):** eval fold 0: 9.18M (41.6/S1); test 86.4M (49.9/S1).
+  India train (353,705 query S1, lexical views only): 14.78M pairs, 41.8 per S1 (p50 29, p95 105, p99 217).
 - **How we ensured true matches were not lost:** recall is measured against the full target pool.
   India train pair recall **0.9732** (views: rev 0.972, combo 0.892, addr 0.733, name 0.412).
   94.5% of true pairs are the target's reverse top-1. Upper bound on India macro F0.5 with perfect matching: **0.9905**.
   The remaining misses are dominated by Indic-script target names (53% of misses vs 23% of found pairs) and by empty
   target addresses combined with names shared by many S1s (undecidable by design).
-  [[TBD: US numbers; the cross-script supplementary view result, see §5]]
+  All countries, eval fold 0, lexical views plus xs/dn: pair recall **0.98787**; blocking-oracle macro F0.5 **0.99631**
+  (0.99430 without xs/dn). US misses are 90% empty-address targets of common names, which are undecidable, so no US-specific
+  view was added.
 
 ---
 
