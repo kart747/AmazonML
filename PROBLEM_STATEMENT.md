@@ -46,8 +46,10 @@ S1-00003	S3-00004
 - No duplicate IDs within a list; no duplicate `source1_entity_id` rows.
 - Only S2/S3 IDs that exist in the test set.
 
-### `candidate_pairs.tsv` — blocking output (not scored)
+### `candidate_pairs.tsv` — blocking output (not scored on the leaderboard, but ranked)
 Columns: `source1_entity_id`, `candidate_entity_ids`
+
+> **Update (2026-09-27):** `candidate_pairs.tsv` and the code that produces it are reviewed for the final ranking. **A smaller candidate set per Source 1 entity is ranked higher**, beyond the public/private leaderboard. Blocking must scale (billions of records). Full verbatim text: `SUBMISSION_REQUIREMENTS.md`.
 
 - The **final** candidate set the matching model actually runs inference over (last filtering stage, not an early raw block).
 - Same rules as above. Every matched ID must also appear as a candidate.
