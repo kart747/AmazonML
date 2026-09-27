@@ -416,3 +416,13 @@ Per region, test US equals the train world with half the S1 entities deleted **t
 Normal: tune 0.98759, **eval 0.98743**, FP 2,042. Dense eval @ τ: **0.98632** (dense_mix 0.98625). Test pred/S1: France 3.396 (dense_mix 3.379, upload #1 3.403), India 3.363, US 3.382. File: `output_variants/xd_dense_mix_plfr` (5,847,281 matches, subset check 0). Held back until upload #2 (dense_mix) and #3 (France-blank probe) show where the LB gap sits.
 
 **Upload queue (agreed with amazonml-27):** U2 = `submission/sub04_xd_dense_mix` (validator PASS, locked, sha 4b4b064ccc1b). U3 = `submission/sub05probe_xd_dense_mix_frblank` (France emptied; US/India byte-identical to U2), so LB(U2) − LB(U3) = w_FR · (F_FR − s_FR).
+- **Result (10:22, build 7.4 min, peak 10.7 GB):** eval fold 0 in the test-like world at the normal τ 0.68:
+
+| model | world eval | US | India | world-tuned τ → eval |
+|---|---|---|---|---|
+| s2lab_all (upload #1) | 0.98592 | **0.98847** (normal 0.98794) | 0.98357 (normal 0.98665) | 0.66 → 0.98593 |
+| s2lab_dense_mix (U2) | **0.98688** | 0.98882 | 0.98508 | 0.64 → 0.98694 |
+
+- **The US half-density hypothesis is rejected.** Deleting half the US S1 together with their true copies makes US slightly *easier*: their siblings' look-alikes disappear with them. India loses the usual −0.003 from orphanization.
+- Neither the S1-pool density nor orphan density reproduces the −0.010 LB gap. With US/India near −0.002, the unexplained loss points to France (unseen) or to error types absent from train.
+- dense_mix beats the shipped model in this world too (+0.0010 overall, +0.0015 India), which supports U2.
