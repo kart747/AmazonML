@@ -709,3 +709,18 @@ amazonml-99 packages this as `sub08_xd_s2lab_all_veto`, built from `output_varia
 **Also this session, from OpenCode (not committed by it):**
 - E-AB1 entity abstention (`abstain_lab.py`): the best rule selected on fold 3, t_margin ≤ 0.1, gives +0.00001 on eval. Null.
 - E-SC1 sibling-conflict features (`sibconf.py`, s2lab_all_sc): eval 0.98737 vs 0.98742, tune 0.98766 vs 0.98783. Null.
+
+**E-G9 addenda (same session).**
+- **Token-agnostic look-alike rule rejected.** The rule drops pairs where the target has one extra name token and a different first house number.
+  - Normal fold 0: US −0.00313 (4,660 removed, 4,584 true), India −0.00379 (3,517 removed, 3,485 true).
+  - LOCO unseen India f0/f3: −0.00098 / −0.00111 (~3,830 removed, ~2,900 true).
+  - Token noise and number noise co-occur on true copies. On France only `snc` (283 kept) looks planted, worth ~+0.00004 LB, so no rule.
+- **Positives-only self-training rejected** (work_loco, `pseudo_label.py --no-oracle --rounds 3 --hi 0.95 --lo -1`, 6.5 min, 8.8 GB):
+
+| rounds | base | 1 | 2 | 3 |
+|---|---|---|---|---|
+| India eval F0.5, positives only | 0.92142 | 0.87128 | 0.81443 | 0.76283 |
+| pseudo-positive precision | | 0.978 | 0.901 | 0.836 |
+| (E-X10 with negatives, lo 0.05) | 0.92142 | 0.92979 | 0.93072 | 0.93130 |
+
+  Without target-country negatives the model over-matches the new country, and each round feeds its own false positives back in. The pseudo-negatives anchor the target distribution despite their 4.5–8.5% error. So the lower-negative variant (`--lo 0.01`, chain_x11) goes the wrong way and was not run. The one-round France application with negatives (`s2lab_all_plfr`, E-X?, output_variants/xd_s2lab_all_plfr) stays the only self-training candidate.
