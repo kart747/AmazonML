@@ -184,9 +184,30 @@ def evaluate(ref, mix, frac, tag):
     return out
 
 
+def predict(name, world, out):
+    """Score the stage2_lab test parts with models/s2lab_<name>.txt; tau from the chosen world's tune fold.
+    Writes reports/test_s2lab_<name>_pairs.parquet and a full submission (candidates = scored pairs)."""
+    WD = config.WORK_DIR
+    rep = json.load(open(WD / "reports" / f"density_train_{name}.json"))["new"][world]["tune"]
+    m = lgb.Booster(model_file=str(WD / "models" / f"s2lab_{name}.txt"))
+    df = pl.scan_parquet(WD / s2.OUT / "test" / "*.parquet").select(["rid", "gid"] + m.feature_name()).collect()
+    p = ap._pred(m, np.ascontiguousarray(df.select(m.feature_name()).to_numpy(), dtype=np.float32))
+    keep = ap.decide(p, df.get_column("gid").to_numpy(), rep["variant"], rep["tau"])
+    pairs = df.select("rid", "gid").with_columns(p=pl.Series(p), keep=pl.Series(keep))
+    pairs.write_parquet(WD / "reports" / f"test_s2lab_{name}_pairs.parquet")
+    config.OUT_DIR = Path(out).resolve()
+    ap.write_submission(pairs.select("rid", "gid"), keep)
+    save_json({"model": f"s2lab_{name}", "tau_world": world, **rep, "matched_pairs": int(keep.sum())},
+              config.OUT_DIR / "decision.json")
+    log(f"predict s2lab_{name}: tau {rep['tau']} ({world} tune) -> {config.OUT_DIR}")
+
+
 def main():
     a = argparse.ArgumentParser()
-    a.add_argument("cmd", choices=["build", "evaluate"])
+    a.add_argument("cmd", choices=["build", "evaluate", "predict"])
+    a.add_argument("--world", choices=["normal", "dense"], default="normal", help="predict: tau from this tune fold")
+    a.add_argument("--name", default="dense", help="predict: model name (models/s2lab_<name>.txt)")
+    a.add_argument("--out", default=None)
     a.add_argument("--drop", type=float, default=0.19)
     a.add_argument("--stage1-tag", default="")
     a.add_argument("--stage1-extra", default="")
@@ -197,8 +218,11 @@ def main():
     x = a.parse_args()
     if x.cmd == "build":
         build(x.drop, x.stage1_tag, [c for c in x.stage1_extra.split(",") if c], [s for s in x.extra.split(",") if s])
-    else:
+    elif x.cmd == "evaluate":
         evaluate(x.ref, x.mix, x.drop, x.tag)
+    else:
+        assert x.out, "--out is required (never overwrite output/)"
+        predict(x.name, x.world, x.out)
 
 
 if __name__ == "__main__":
