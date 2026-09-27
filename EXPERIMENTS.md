@@ -501,3 +501,10 @@ The pool-size-dependent rate makes names look more ambiguous on test, and the mo
   - A US-only stage 1 is almost harmless once stage 2 has target labels (oracle 0.98325). The damage is in stage 2's learned mapping from a shifted p1/context to a decision.
   - One pseudo-label round recovers only 0.008 of 0.062.
 - **Implication:** France is plausibly ~0.93. Then with w_FR ≈ 0.15, LB = 0.85·0.985 + 0.15·0.93 ≈ 0.977, which is exactly the observed 0.97741. work_loco is now the label-backed test bed for every France fix: amazonml-46 runs the freq rescale and iterative self-training there, E-G6 ablates feature groups.
+
+**E-X9 result: name-frequency rescale is REJECTED (label-backed, work_loco).** In the France analogue (stage 1 + stage 2 trained on US only, scored on India fold 0 with τ from the US tune fold), India's rates sit on an 883k pool while the model learned on 1.32M. Rescaling India q_nm_freq/t_nm_freq by 0.667:
+- US-only stage 2: 0.92142 → 0.92135.
+- Shipped s2lab_all on US-only p1: 0.95836 → 0.95802.
+- Flat at every τ in 0.5–0.9.
+
+The per-split rate makes train vs test perfectly separable but does not drive errors. **Not used**, and no upload spent. amazonml-27's full LOCO (E-G5) puts the unseen-country loss at **~0.06** (0.922 vs 0.983 oracle), which matches France ≈ 0.93 on the LB. One pseudo-label round gives +0.008 there. Iterative self-training (3 rounds, fixed 0.95 or a 0.99 → 0.95 schedule) is queued in work_loco (`work/chain_x10.sh`).
