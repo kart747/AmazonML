@@ -375,3 +375,39 @@ The shipped s2lab_all labels France test pairs: p ≥ 0.95 and the target's best
 - Test: France pred/S1 3.403 → 3.427 (+0.024), mass/S1 3.503 → 3.468. The France distribution gets sharper (more recall, fewer uncertain pairs), matching the proxy (E-X4: +0.0028 on the unseen country, all through recall).
 - File: `output_variants/xd_s2lab_all_plfr` (5,862,360 matches, subset check 0). France-only effect on the LB ≈ w_FR · ΔF_FR.
 - Running: the combination (dense_mix labels France, then dense+normal+France pseudo rows) → `output_variants/xd_dense_mix_plfr`.
+
+## E-G0. LB-gap audit, label-free (main session; upload #1 = 0.97741 vs local 0.98742)
+Train vs test structure (`work/prep`):
+
+| | train | test |
+|---|---|---|
+| S1 (US / India / France) | 1,323,633 / 883,188 / **0** | 663,106 / 809,986 / **259,452** |
+| targets per S1 (US / India / France) | 4.67 / 4.68 / – | 5.76 / 5.82 / 5.53 |
+| S1 pool density vs train | 1 | **US 0.50×**, India 0.92× |
+| S1 sharing an exact address with another S1 | US 5.6%, India 5.1% | US 4.0%, India 5.0%, **France 11.9%** |
+
+- **No leakage**: S1/target entity ids don't overlap across splits, there are 0 exact name+address test-S1 duplicates of train S1, and there's no id or row-order correlation within true pairs.
+- **France is unseen** (15% of test S1). It has 18 cities, S1 addresses carry a multi-token region while targets often carry the department, and French suffix tokens (sarl/sas/eurl/sci, groupe, développement, & Fils, & Cie, & Associés) are new.
+- **US test has more planted look-alikes.** Targets carrying affiliate tokens (group/partners/holdings/ltd/co/corp) go from 0.90 to 1.45 per S1, and branch tokens (eastgate, southside, …) from 0.32 to 0.57 per S1. In train, extra group/holdings/branch tokens are 0% true and carry shifted house numbers (hn_eq ~2%). In US test the mid-band (0.2–0.99) affiliate mass is 3× eval (0.016 → 0.051 per S1), while non-affiliate mid mass is unchanged.
+- The **score distribution** above p 0.999 is unchanged per S1 (US 2.99 vs 3.01, India 2.87 vs 2.90), so there are not more true copies. The mid-band grows 10–30% for US/India. For France it is about 2× (0.78 vs ~0.52 per S1 in 0.2–0.999).
+- **France extra-name-token kept rates** (the target adds the token vs the S1): fils 70%, et 67%, cie 61%, associes 47%, groupe 25%, développement 24%; holding/international/distribution/participations/snc about 0.2%. In US/India train, the analogous "and / associates / sons / group / holdings" extras are 0–1% true.
+  - Their house numbers differ: fils/cie/associes/et have the same house number 84–90% of the time, the rejected ones ~15%. Without labels this remains ambiguous: they could be true suffix variants (France recall) or same-address siblings (precision).
+- Per-source match counts and the S2-only / S3-only / n=1 / n≥6 shares of test predictions match train truth in every country, France included. 185 S1 exceed the S2 cap of 5 and 24 exceed the S3 cap of 6 (negligible).
+
+## E-G1. France-only re-normalization (`fr_renorm.py`, isolated `work_fr`, same models)
+Each region/department comma-segment becomes one region code (hdf/naq/pdl, like US/India state codes), and "et" becomes "and" in names. Only France feat/featx/feat2/s2lab test parts are rebuilt; the candidates are the same rows.
+- Confident France pairs had address token Jaccard 0.74 (US 0.83, India 0.79).
+- Effect: France kept 883,013 → 882,573, kept in both 876,026 (~0.8% of France kept pairs change), mid mass slightly lower, >0.999 mass 2.83 → 2.86. US/India are byte-identical.
+- **Decision: too small to spend an upload on alone.** It is kept only as a possible add-on to a France candidate. Runtime ~20 min, peak 10 GB (features_v2).
+
+## E-G2. Covariate-shift reweighting (`shift_reweight.py`)
+Eval-fold S1s are reweighted so their label-free covariate histogram matches test: candidate count, affiliate candidates, mid-band count, >0.99 count, affiliate mid-band.
+- Estimated test F0.5: US 0.9861, India 0.9850, France (from pooled US+India cells) 0.979; overall 0.9845 vs eval 0.98742.
+- So candidate-structure shift explains about −0.003, like the 19% density sim (E-D1). The remaining ≈ −0.007 must come from P(error | covariates) changing on test: new error patterns that are not in train.
+
+Rejected: an **affiliate guard** (drop kept pairs whose target adds an affiliate/branch token AND whose house number differs). On eval, the pairs it hits are 95% true (fold 0: US 381 TP vs 21 FP, India 516 vs 12) because house numbers are noisy in true pairs.
+
+## E-G3. Test-world simulation (`world_sim.py`, built, run pending)
+Per region, test US equals the train world with half the S1 entities deleted **together with their true copies**, while the orphans stay: 1.22 / 0.5 = 2.44 orphans per S1, matching test's ~2.3. The 19% sim instead keeps a 0.81×-dense S1 pool.
+- Build: US drops 50% of S1 and deletes their 2.29M true targets. India drops 19% and orphanizes them (India's orphan density cannot be reached by deletion).
+- It recomputes the reverse context, name frequencies, forward ranks r_name/r_addr/r_combo, and q_rank/q_gap/q_ncand after the deletions, followed by stage 1 → stage 2 features.
