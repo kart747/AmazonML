@@ -723,4 +723,4 @@ amazonml-99 packages this as `sub08_xd_s2lab_all_veto`, built from `output_varia
 | pseudo-positive precision | | 0.978 | 0.901 | 0.836 |
 | (E-X10 with negatives, lo 0.05) | 0.92142 | 0.92979 | 0.93072 | 0.93130 |
 
-  Without target-country negatives the model over-matches the new country, and each round feeds its own false positives back in. The pseudo-negatives anchor the target distribution despite their 4.5–8.5% error. So the lower-negative variant (`--lo 0.01`, chain_x11) goes the wrong way and was not run. The one-round France application with negatives (`s2lab_all_plfr`, E-X?, output_variants/xd_s2lab_all_plfr) stays the only self-training candidate.
+  Without target-country negatives the model over-matches the new country, and each round feeds its own false positives back in. The pseudo-negatives anchor the target distribution despite their 4.5–8.5% error. So the lower-negative variant (`--lo 0.01`, chain_x11) goes the wrong way and was not run. The one-round France application with negatives (`s2lab_all_plfr`, E-X7, output_variants/xd_s2lab_all_plfr) stays the only self-training candidate.
