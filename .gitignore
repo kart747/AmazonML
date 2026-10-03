@@ -12,3 +12,4 @@ __pycache__/
 
 # submission packages: TSVs are too large for git (verify with SHA256SUMS); metadata is tracked
 submission/**/output/*.tsv
+submission/UPLOAD_sub09/*.tsv

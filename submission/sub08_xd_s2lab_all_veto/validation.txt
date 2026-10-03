@@ -1,0 +1,18 @@
+# official validator, 2026-09-27 15:29:37 IST
+# python3 student_resource/utils/validate_submission.py --matching output/matching_results.tsv --candidate output/candidate_pairs.tsv --test-dir student_resource/dataset/test --check-ids
+# validator sha256: f96f59934383a15095914f507620c078c474e8f9c60e864b2d051ed173a22dfc
+ML Challenge 2026 — submission validator
+  test dir: /home/kart/Projects/AmazonML/student_resource/dataset/test
+  required S1 entities: 1732544
+  valid S2/S3 match IDs: 9969589
+  matching_results.tsv: 1732544 rows (99660 empty, 1632884 non-empty).
+  candidate_pairs.tsv: 1732544 rows (11259 empty, 1721285 non-empty).
+
+PASS — no blocking issues found. Safe to submit.
+# exit code: 0
+
+# hard check: matched ids subset of candidates (redecode.py check)
+[15:30:21] [rss   2.3G] subset check /home/kart/Projects/AmazonML/submission/sub08_xd_s2lab_all_veto/output: 5,856,139 matched ids, 9,585,603 candidate ids, 0 matched ids not in candidates
+# sha256 after validation
+6e0b948bc083520971c223f790b0fb353c81d23c9f345ff26ef6ac5e9e5e9b77  output/matching_results.tsv
+23caf70a1767123e3b01c8b136436aa0f8bd677561266aa55ec5dfea2eb70a54  output/candidate_pairs.tsv

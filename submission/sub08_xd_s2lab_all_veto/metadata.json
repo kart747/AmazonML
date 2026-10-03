@@ -1,0 +1,24 @@
+{
+  "submission_id": "sub08_xd_s2lab_all_veto",
+  "purpose": "candidate: upload #1 minus planted affiliate/branch look-alike FPs (train-learned affiliate-token veto only; the France house-number guard of sub07 is dropped, E-G9)",
+  "upload_file": "output/matching_results.tsv",
+  "files": {
+    "output/matching_results.tsv": {"sha256": "6e0b948bc083520971c223f790b0fb353c81d23c9f345ff26ef6ac5e9e5e9b77", "data_rows": 1732544, "matched_pairs": 5856139},
+    "output/candidate_pairs.tsv": {"sha256": "23caf70a1767123e3b01c8b136436aa0f8bd677561266aa55ec5dfea2eb70a54", "data_rows": 1732544, "candidate_pairs": 9585603, "candidates_per_s1": 5.533}
+  },
+  "copied_from": "output_variants/xd_s2lab_all_guard_veto (byte-identical)",
+  "base": "upload #1 sha f9ff0a26696c (sub03p, public LB 0.97741); candidate_pairs.tsv byte-identical to it",
+  "diff_vs_upload1": {"pairs_removed": 4667, "pairs_added": 0, "removed_by_country": {"US": 1840, "India": 2826, "France": 1},
+                      "changed_s1_rows": {"US": 1773, "India": 2734, "France": 1}, "s1_rows_became_empty": {"US": 51, "India": 114}},
+  "rule": "drop a kept pair when the target name = S1 name + exactly one extra token and that token is in the 46-token list learned on tune fold 3 (n>=50 single-extra pairs, true rate <=2%)",
+  "local_validation": {
+    "eval_fold0": "0.98742 -> 0.98748 (49 removed, 0 true)", "tune_fold3": "0.98783 -> 0.98787 (30 removed, 0 true)",
+    "E-G9 guard_audit": "0 true removed in all 16 normal + test-world-sim cells (s2lab_all and dense_mix, folds 0/3, US/India), delta +0.00002..+0.00008",
+    "LOCO France proxy (US-only stage 1+2 -> India)": "fold0 0.92193 -> 0.92559 (+0.0037, 1,345 removed, 0 true); fold3 +0.0035"
+  },
+  "label_free_test_evidence": "leading house-number agreement of removed pairs: US 0.131 (n=1,650) vs 0.850 other kept US; India 0.200 (n=2,139) vs 0.824 -> ~76-86% planted vs ~25% break-even",
+  "predicted_public_delta": "+0.0003 .. +0.0006",
+  "git": {"code": "src/experiments/lb_guards.py (commit 04a4fc8)"},
+  "reproduce": ["cd code/business_entity_resolution && BER_WORK_DIR=../../work_xd python src/experiments/lb_guards.py write --rules veto --out <dir>"],
+  "leaderboard": {"public_f05": null, "uploaded_at": null}
+}

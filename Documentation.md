@@ -1,12 +1,12 @@
 # ML Challenge 2026: Business Entity Resolution Solution
 
-**Team Name:** [[TBD: team name]]
-**Team Members:** [[TBD: members]]
-**Submission Date:** [[TBD]]
+**Team Name:** Kali
+**Team Members:** Karthik (GitHub: kart747)
+**Submission Date:** 2026-10-02 (final upload, leaderboard file `sub09`, 27 Sep 2026)
 
-> Draft status: every number below was measured on the provided training data by our own
-> code, unless it is marked `[[TBD]]`. Placeholders are filled from `work/reports/*.json` and
-> `EXPERIMENTS.md` when the final runs finish. No external data, APIs or pretrained models are used.
+> Every number below was measured on the provided training data by our own code. The only pretrained model is
+> multilingual-e5-small (MIT licence, 118M parameters, far below the 8B limit), used as a blocking view for non-Latin
+> India targets. No external data or APIs are used. Full experiment log: `EXPERIMENTS.md`; upload log: `SUBMISSIONS.md`.
 
 ---
 
@@ -18,7 +18,10 @@ Source-1 records. It exploits the fact that every target belongs to at most one 
 entity. A LightGBM matcher then scores the candidates. It combines pairwise similarities with
 label-free candidate-graph context (does this target prefer a different Source-1 record?).
 The decision layer uses a threshold tuned on held-out macro F0.5, plus target exclusivity.
-[[TBD: final validation macro F0.5 and leaderboard score]]
+The submitted file (`sub09`) adds cross-script (xs / e5) retrieval for India, a cascade-pruned stage-2 matcher with
+extra features, a train-learned affiliate-token veto, and one round of pseudo-labelling for the unseen country (France).
+Local macro F0.5 on held-out fold 0: **0.98748** (US/India; France has no labels). Public leaderboard: **0.978**
+(first upload 0.97741). The final candidate set is **5.53 pairs per Source-1 entity**, down from 49.9 at retrieval.
 
 ---
 
@@ -114,7 +117,11 @@ Pipeline: `prepare → block → features → evaluate (fit on train folds, tune
 - Context (many-to-one competition): per-view retrieval ranks, the target's best reverse score and runner-up gap, whether this
   S1 is the target's best S1, the margin over the best other S1, rank and gap inside the S1's own candidate list, list
   size, and name frequency among S1 (ambiguity, as a rate per 1M S1 of the country).
-- [[TBD: stage-2 collective features and features v2 if kept]]
+- Features v2 (`featx`, kept): learned native→Latin token dictionary (train folds only), consonant skeletons, IDF of the
+  rarest one-sided name token (the orphan look-alike signature), learned core-token overlap, number conflicts. It was the
+  largest single gain (+0.0048 tune, FP −46%).
+- Stage-2 lab (`all`, 92 features, kept): cluster support against the S1's confident set, twin counts, p1 rank/confidence
+  within source, space-stripped name similarity, exact/contained address, out-of-vocabulary name share.
 
 **Model type:** LightGBM (MIT licence; far below the 8B-parameter limit). Two variants were compared on the same candidates and split:
 - A1: independent pair classifier (pairwise features only).
@@ -124,25 +131,36 @@ Pipeline: `prepare → block → features → evaluate (fit on train folds, tune
 
 **Threshold selection method:** S1-grouped folds (`int(id) % 10`): train folds 1–2, tuning fold 3, reporting fold 0; folds 4–9 untouched.
 τ (grid 0.30–0.95) and the exclusivity variant (keep a target only for its highest-scoring S1) are chosen
-on fold 3 by exact macro F0.5, and reported once on fold 0. [[TBD: chosen τ; density-adjusted τ for test]]
+on fold 3 by exact macro F0.5, and reported once on fold 0. Final: τ = 0.68 with target exclusivity (tune fold 3: 0.98783). The τ curve stays flat under the test's higher
+target density, so the same τ is used on test. A post-hoc veto drops 4,667 pairs whose only name difference is an
+affiliate token (`group`, `holdings`, `ventures`, ...) learned on the tune fold (true rate ≤ 2%; 0 true pairs removed on eval).
+France decisions come from a stage-2 model retrained with France pseudo-labels (p ≥ 0.95 positive, p ≤ 0.05 negative, τ 0.70).
 
 ---
 
 ## 5. Results & Error Analysis
 
-- **F_0.5 Score (macro, fold 0, every S1 counted incl. blocking misses):** [[TBD: A1 / A2]]
-- **Precision / recall / singleton accuracy:** [[TBD]]
-- **Common false positives (wrong merges):** [[TBD from reports/errors_A2.md]]
-- **Common false negatives (missed matches):** blocking misses as in §3. [[TBD scoring FNs]]
+- **F_0.5 Score (macro, fold 0, every S1 counted incl. blocking misses):** A1 0.96428 → A2 0.98045 → final xd + stage-2 lab 0.98748 (tune 0.98787). Leaderboard 0.978.
+- **Precision / recall / singleton accuracy:** Precision 0.99665 / recall 0.97018 (macro); pair precision 0.99687, pair recall 0.97038; singleton accuracy 0.99045; 3.37 predicted pairs per S1.
+- **Common false positives (wrong merges):** 78% of false-positive targets belong to no S1: orphan look-alikes with the same address and a one-character or one-token name edit. On test, planted affiliate-token look-alikes are the main source; the veto removes them.
+- **Common false negatives (missed matches):** blocking misses as in §3. Remaining misses are partial misses inside multi-match S1 (shared names, empty target addresses, coined or glued names, perturbed house numbers); 10% of FN pairs score below 0.05.
 
 | Experiment | Macro F0.5 (fold 0) | Kept? |
 |---|---|---|
-| [[TBD]] | | |
+| A1 pairwise | 0.96428 | baseline |
+| A2 two-stage relational | 0.98045 | yes |
+| + xs/dn India blocking + stage-2 lab `all` (final) | 0.98748 | **yes** |
+| + affiliate veto | 0.98748 (0 true removed) | yes |
+| + France pseudo-labelling (France only) | US/India unchanged; unseen-country proxy 0.92142 → 0.92979 | yes |
+| Dense-mix stage 2, hyper-parameter search, France house-number guard | no gain / unsupported | no |
 
 ---
 
 ## 6. Conclusion
-[[TBD]]
+We cast entity resolution as exact reverse retrieval, a learned candidate filter, a two-stage LightGBM matcher and an F0.5-tuned decision
+with target exclusivity, all label-agnostic so the unseen country France is handled identically. The final candidate set is about 5.5
+pairs per Source-1 entity with 98.8% pair recall. The lesson was that precision against planted look-alikes, not recall,
+bounds the score, and that train-to-test shift (density, an unseen country) needs explicit proxies.
 
 ---
 
@@ -153,8 +171,11 @@ on fold 3 by exact macro F0.5, and reported once on fold 0. [[TBD: chosen τ; de
 The `src/ber/` library contains io, normalize, blocking, features, approaches, metric, decoders and utils.
 `src/experiments/` holds the ablation and analysis tools; `tests/` has a synthetic-data smoke test.
 Reproduce with:
-`python src/run.py prepare && python src/run.py block && python src/run.py features && python src/run.py evaluate --approach 2 && python src/run.py predict --approach 2`.
+`python src/run.py prepare && python src/run.py block && python src/run.py features && python src/run.py evaluate --approach 2 && python src/run.py predict --approach 2` gives the base pipeline.
+The submitted file adds the steps in the README section "Final submission (sub09)".
 Every stage is resumable and writes timing and peak RAM to `work/telemetry.jsonl`.
 
 ### B. Additional Results
-[[TBD]]
+Full experiment history, ablations and leaderboard log: `EXPERIMENTS.md`, `SUBMISSIONS.md` in the project repository.
+Test candidate statistics (final): 9,585,603 candidate pairs for 1,732,544 S1 entities (5.53/S1); 5,862,245 matched pairs;
+every matched pair is in `candidate_pairs.tsv` (checked by `redecode.py check`); the official validator passes.
